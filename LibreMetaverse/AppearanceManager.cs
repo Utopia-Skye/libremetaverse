@@ -103,6 +103,15 @@ namespace OpenMetaverse
 
     #endregion Enums
 
+    [Serializable]
+    public class AppearanceManagerException : Exception
+    {
+        public AppearanceManagerException() { }
+
+        public AppearanceManagerException(string message)
+        : base(message) { }
+    }
+
     public class AppearanceManager
     {
         #region Constants
@@ -486,7 +495,7 @@ namespace OpenMetaverse
                                     Logger.Log(
                                         "Failed to retrieve a list of current agent wearables, appearance cannot be set",
                                         Helpers.LogLevel.Error, Client);
-                                    throw new Exception(
+                                    throw new AppearanceManagerException(
                                         "Failed to retrieve a list of current agent wearables, appearance cannot be set");
                                 }
                                 GotWearables = true;
@@ -663,7 +672,7 @@ namespace OpenMetaverse
 
         public IEnumerable<UUID> GetWearableAssets(WearableType type)
         {
-            IList<WearableData> wearables = Wearables.GetValues(type, true);
+            var wearables = Wearables.GetValues(type, true);
             return wearables.Select(wearable => wearable.AssetID).ToList();
         }
 
@@ -673,7 +682,7 @@ namespace OpenMetaverse
         /// <param name="wearableItem">Wearable to be added to the outfit</param>
         public void AddToOutfit(InventoryItem wearableItem)
         {
-            List<InventoryItem> wearableItems = new List<InventoryItem> { wearableItem };
+            var wearableItems = new List<InventoryItem> { wearableItem };
             AddToOutfit(wearableItems);
         }
 
@@ -684,7 +693,7 @@ namespace OpenMetaverse
         /// <param name="replace">Should existing item on the same point or of the same type be replaced</param>
         public void AddToOutfit(InventoryItem wearableItem, bool replace)
         {
-            List<InventoryItem> wearableItems = new List<InventoryItem> { wearableItem };
+            var wearableItems = new List<InventoryItem> { wearableItem };
             AddToOutfit(wearableItems, replace);
         }
 
@@ -711,8 +720,8 @@ namespace OpenMetaverse
 
             foreach (InventoryItem item in wearableItems)
             {
-                if (item is InventoryWearable)
-                    wearables.Add((InventoryWearable)item);
+                if (item is InventoryWearable wearable)
+                    wearables.Add(wearable);
                 else if (item is InventoryAttachment || item is InventoryObject)
                     attachments.Add(item);
             }
@@ -729,8 +738,10 @@ namespace OpenMetaverse
                         ItemID = wearableItem.UUID,
                         WearableType = wearableItem.WearableType
                     };
-                    if (replace) // Dump everything from the key
+                    if (replace || wearableItem.AssetType == AssetType.Bodypart) {
+                        // Dump everything from the key
                         Wearables.Remove(wearableItem.WearableType);
+                    }
                     Wearables.Add(wearableItem.WearableType, wd);
                 }
             }
@@ -770,8 +781,8 @@ namespace OpenMetaverse
 
             foreach (var item in wearableItems)
             {
-                if (item is InventoryWearable)
-                    wearables.Add((InventoryWearable)item);
+                if (item is InventoryWearable wearable)
+                    wearables.Add(wearable);
                 else if (item is InventoryAttachment || item is InventoryObject)
                     attachments.Add(item);
             }
@@ -780,26 +791,24 @@ namespace OpenMetaverse
             lock (Wearables)
             {
                 // Remove the given wearables from the wearables collection
-                foreach (InventoryWearable t in wearables)
+                foreach (InventoryWearable wearable in wearables)
                 {
-                    InventoryWearable wearableItem = t;
-                    if (t.AssetType != AssetType.Bodypart        // Remove if it's not a body part
-                        && Wearables.ContainsKey(wearableItem.WearableType)) // And we have that wearable type
+                    if (wearable.AssetType != AssetType.Bodypart        // Remove if it's not a body part
+                        && Wearables.ContainsKey(wearable.WearableType)) // And we have that wearable type
                     {
-                        var worn = Wearables.GetValues(wearableItem.WearableType, true);
-                        WearableData wearable = worn.FirstOrDefault(item => item.ItemID == wearableItem.UUID);
-                        if (wearable != null)
-                        {
-                            Wearables.Remove(wearableItem.WearableType, wearable);
-                            needSetAppearance = true;
-                        }
+                        var worn = Wearables.GetValues(wearable.WearableType, true);
+                        WearableData wearableData = worn.FirstOrDefault(item => item.ItemID == wearable.UUID);
+                        if (wearableData == null) continue;
+
+                        Wearables.Remove(wearable.WearableType, wearableData);
+                        needSetAppearance = true;
                     }
                 }
             }
 
-            foreach (var t in attachments)
+            foreach (var attachment in attachments)
             {
-                Detach(t.UUID);
+                Detach(attachment.UUID);
             }
 
             if (needSetAppearance)
@@ -833,8 +842,8 @@ namespace OpenMetaverse
 
             foreach (InventoryItem item in wearableItems)
             {
-                if (item is InventoryWearable)
-                    wearables.Add((InventoryWearable)item);
+                if (item is InventoryWearable wearable)
+                    wearables.Add(wearable);
                 else if (item is InventoryAttachment || item is InventoryObject)
                     attachments.Add(item);
             }
@@ -851,7 +860,8 @@ namespace OpenMetaverse
                     for (int i = 0; i < WEARABLE_COUNT; i++)
                     {
                         WearableType wearableType = (WearableType)i;
-                        if (WearableTypeToAssetType(wearableType) == AssetType.Bodypart && !Wearables.ContainsKey(wearableType))
+                        if (WearableTypeToAssetType(wearableType) == AssetType.Bodypart 
+                            && !Wearables.ContainsKey(wearableType))
                         {
                             needsCurrentWearables = true;
                             break;
@@ -873,10 +883,18 @@ namespace OpenMetaverse
             {
                 SetAppearanceSerialNum++;
             }
-            ReplaceOutfit(wearables);
-            AddAttachments(attachments, true, false);
-            SendAgentIsNowWearing();
-            DelayedRequestSetAppearance();
+
+            try
+            {
+                ReplaceOutfit(wearables);
+                AddAttachments(attachments, true, false);
+                SendAgentIsNowWearing();
+                DelayedRequestSetAppearance();
+            }
+            catch (AppearanceManagerException e)
+            {
+                Logger.Log(e.Message, Helpers.LogLevel.Error, Client);
+            }
         }
 
         /// <summary>
@@ -1196,7 +1214,10 @@ namespace OpenMetaverse
         /// <param name="wearableItems">Wearable items to replace the Wearables collection with</param>
         private void ReplaceOutfit(List<InventoryWearable> wearableItems)
         {
+            // *TODO: This could use some love. We need to sanitize wearable layers, and this may not be
+            //        the most efficient way of doing that.
             var newWearables = new MultiValueDictionary<WearableType, WearableData>();
+            var bodyparts = new Dictionary<WearableType, WearableData>();
 
             lock (Wearables)
             {
@@ -1208,7 +1229,7 @@ namespace OpenMetaverse
                     {
                         if (entry.AssetType == AssetType.Bodypart)
                         {
-                            newWearables.Add(wearableType.Key, entry);
+                            bodyparts[wearableType.Key] = entry;
                         }
                     }
                 }
@@ -1223,12 +1244,34 @@ namespace OpenMetaverse
                         ItemID = wearableItem.UUID,
                         WearableType = wearableItem.WearableType
                     };
-
-                    newWearables.Add(wearableItem.WearableType, wd);
+                    // Body cannot be layered. Overwrite when multiple are selected.
+                    if (wearableItem.AssetType == AssetType.Bodypart) {
+                        bodyparts[wearableItem.WearableType] = wd;
+                    } else {
+                        newWearables.Add(wearableItem.WearableType, wd);
+                    }
                 }
 
-                // Replace the Wearables collection
-                Wearables = newWearables;
+                // merge bodyparts into new wearable list
+                foreach (var bodypart in bodyparts)
+                {
+                    newWearables.Add(bodypart.Key, bodypart.Value);
+                }
+
+                // heavy handed body part sanity check
+                if (newWearables.ContainsKey(WearableType.Shape) && 
+                    newWearables.ContainsKey(WearableType.Skin) &&
+                    newWearables.ContainsKey(WearableType.Eyes) &&
+                    newWearables.ContainsKey(WearableType.Hair))
+                {
+                    // Replace the Wearables collection
+                    Wearables = newWearables;
+                }
+                else
+                {
+                    throw new AppearanceManagerException(
+                        "Wearables collection does not contain all required body parts; appearance cannot be set");
+                }
             }
         }
 
