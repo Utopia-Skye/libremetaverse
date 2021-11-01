@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2006-2016, openmetaverse.co
+ * Copyright (c) 2021, Sjofn LLC
  * All rights reserved.
  *
  * - Redistribution and use in source and binary forms, with or without 
@@ -570,6 +571,12 @@ namespace OpenMetaverse
         public bool ObscureMusic;
         /// <summary>A struct containing media details</summary>
         public ParcelMedia Media;
+        /// <summary>Parcel privacy see avatars outside/inside parcel</summary>
+        public bool SeeAVs;
+        /// <summary>Parcel privacy play sounds attached to avatars outside/inside parcel</summary>
+        public bool AnyAVSounds;
+        /// <summary>Parcel privacy play sounds for group members</summary>
+        public bool GroupAVSounds;
 
         /// <summary>
         /// Displays a parcel object in string format
@@ -635,12 +642,15 @@ namespace OpenMetaverse
                     SalePrice = (uint) SalePrice,
                     SnapshotID = SnapshotID,
                     UserLocation = UserLocation,
-                    UserLookAt = UserLookAt
+                    UserLookAt = UserLookAt,
+                    SeeAVs = SeeAVs,
+                    AnyAVSounds = AnyAVSounds,
+                    GroupAVSounds = GroupAVSounds
                 };
 
                 OSDMap body = req.Serialize();
 
-                request.BeginGetResponse(body, OSDFormat.Xml, simulator.Client.Settings.CAPS_TIMEOUT);
+                request.PostRequestAsync(body, OSDFormat.Xml, simulator.Client.Settings.CAPS_TIMEOUT);
             }
             else
             {
@@ -1133,7 +1143,7 @@ namespace OpenMetaverse
                             simulator.ParcelMap[y, x] = 0;
             }
 
-            Thread th = new Thread(delegate()
+            ThreadPool.QueueUserWorkItem((_) =>
             {
                 int count = 0, timeouts = 0, y, x;
 
@@ -1165,8 +1175,6 @@ namespace OpenMetaverse
 
                 simulator.DownloadingParcelMap = false;
             });
-
-            th.Start();
         }
 
         /// <summary>
@@ -1663,9 +1671,9 @@ namespace OpenMetaverse
 
                 try
                 {
-                    OSD result = request.GetResponse(msg.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+                    OSDMap result = request.PostRequest(msg.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT) as OSDMap;
                     RemoteParcelRequestReply response = new RemoteParcelRequestReply();
-                    response.Deserialize((OSDMap)result);
+                    response.Deserialize(result);
                     return response.ParcelID;
                 }
                 catch (Exception)
@@ -1702,7 +1710,7 @@ namespace OpenMetaverse
                         response.Deserialize((OSDMap)result);
 
                         CapsClient summaryRequest = new CapsClient(response.ScriptResourceSummary, "ScriptResourceSummary");
-                        OSD summaryResponse = summaryRequest.GetResponse(Client.Settings.CAPS_TIMEOUT);
+                        OSD summaryResponse = summaryRequest.GetRequest(Client.Settings.CAPS_TIMEOUT);
 
                         LandResourcesInfo res = new LandResourcesInfo();
                         res.Deserialize((OSDMap)summaryResponse);
@@ -1710,7 +1718,7 @@ namespace OpenMetaverse
                         if (response.ScriptResourceDetails != null && getDetails)
                         {
                             CapsClient detailRequest = new CapsClient(response.ScriptResourceDetails, "ScriptResourceDetails");
-                            OSD detailResponse = detailRequest.GetResponse(Client.Settings.CAPS_TIMEOUT);
+                            OSD detailResponse = detailRequest.GetRequest(Client.Settings.CAPS_TIMEOUT);
                             res.Deserialize((OSDMap)detailResponse);
                         }
                         callback(true, res);
@@ -1723,7 +1731,7 @@ namespace OpenMetaverse
                 };
 
                 LandResourcesRequest param = new LandResourcesRequest {ParcelID = parcelID};
-                request.BeginGetResponse(param.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+                request.PostRequestAsync(param.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
 
             }
             catch (Exception ex)
@@ -1743,7 +1751,7 @@ namespace OpenMetaverse
         /// <remarks>Raises the <see cref="ParcelDwellReply"/> event</remarks>
         protected void ParcelDwellReplyHandler(object sender, PacketReceivedEventArgs e)
         {            
-            if (m_DwellReply != null || Client.Settings.ALWAYS_REQUEST_PARCEL_DWELL == true)
+            if (m_DwellReply != null || Client.Settings.ALWAYS_REQUEST_PARCEL_DWELL)
             {
                 Packet packet = e.Packet;
                 Simulator simulator = e.Simulator;
@@ -1789,7 +1797,7 @@ namespace OpenMetaverse
                 GlobalY = info.Data.GlobalY,
                 GlobalZ = info.Data.GlobalZ,
                 ID = info.Data.ParcelID,
-                Mature = ((info.Data.Flags & 1) != 0) ? true : false,
+                Mature = ((info.Data.Flags & 1) != 0),
                 Name = Utils.BytesToString(info.Data.Name),
                 OwnerID = info.Data.OwnerID,
                 SalePrice = info.Data.SalePrice,
@@ -1844,7 +1852,11 @@ namespace OpenMetaverse
                 RegionDenyAgeUnverified = msg.RegionDenyAgeUnverified,
                 RegionDenyAnonymous = msg.RegionDenyAnonymous,
                 RegionPushOverride = msg.RegionPushOverride,
-                RentPrice = msg.RentPrice
+                RentPrice = msg.RentPrice,
+                SeeAVs = msg.SeeAVs,
+                AnyAVSounds = msg.AnyAVSounds,
+                GroupAVSounds = msg.GroupAVSounds
+                
             };
 
             ParcelResult result = msg.RequestResult;
@@ -1929,7 +1941,7 @@ namespace OpenMetaverse
         /// <remarks>Raises the <see cref="ParcelAccessListReply"/> event</remarks>
         protected void ParcelAccessListReplyHandler(object sender, PacketReceivedEventArgs e)
         {
-            if (m_ParcelACL != null || Client.Settings.ALWAYS_REQUEST_PARCEL_ACL == true)
+            if (m_ParcelACL != null || Client.Settings.ALWAYS_REQUEST_PARCEL_ACL)
             {
                 Packet packet = e.Packet;
                 Simulator simulator = e.Simulator;
@@ -2031,11 +2043,11 @@ namespace OpenMetaverse
             ParcelMediaUpdatePacket reply = (ParcelMediaUpdatePacket)packet;
             ParcelMedia media = new ParcelMedia
             {
-                MediaAutoScale = (reply.DataBlock.MediaAutoScale == (byte) 0x1) ? true : false,
+                MediaAutoScale = (reply.DataBlock.MediaAutoScale == (byte) 0x1),
                 MediaID = reply.DataBlock.MediaID,
                 MediaDesc = Utils.BytesToString(reply.DataBlockExtended.MediaDesc),
                 MediaHeight = reply.DataBlockExtended.MediaHeight,
-                MediaLoop = ((reply.DataBlockExtended.MediaLoop & 1) != 0) ? true : false,
+                MediaLoop = ((reply.DataBlockExtended.MediaLoop & 1) != 0),
                 MediaType = Utils.BytesToString(reply.DataBlockExtended.MediaType),
                 MediaWidth = reply.DataBlockExtended.MediaWidth,
                 MediaURL = Utils.BytesToString(reply.DataBlock.MediaURL)
@@ -2073,7 +2085,7 @@ namespace OpenMetaverse
             else
             {
                 Logger.Log("Parcel overlay with sequence ID of " + overlay.ParcelData.SequenceID +
-                    " received from " + simulator.ToString(), Helpers.LogLevel.Warning, Client);
+                    " received from " + simulator, Helpers.LogLevel.Warning, Client);
             }
         }
 

@@ -81,7 +81,9 @@ namespace OpenMetaverse
         /// <summary>Whether the object has a name value pairs string</summary>
         HasNameValues = 0x100,
         /// <summary>Whether the object has a Media URL set</summary>
-        MediaURL = 0x200
+        MediaURL = 0x200,
+        /// <summary>Whether the object has, you guessed it, new particles</summary>
+        HasParticlesNew = 0x400
     }
 
     /// <summary>
@@ -1694,7 +1696,7 @@ namespace OpenMetaverse
                         }
                     };
 
-                request.BeginGetResponse(req.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+                request.PostRequestAsync(req.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
             }
             else
             {
@@ -1723,7 +1725,7 @@ namespace OpenMetaverse
                             Logger.Log("ObjectMediaUpdate: " + error.Message, Helpers.LogLevel.Error, Client);
                         }
                     };
-                request.BeginGetResponse(req.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+                request.PostRequestAsync(req.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
             }
             else
             {
@@ -1757,13 +1759,11 @@ namespace OpenMetaverse
                         ObjectMediaMessage msg = new ObjectMediaMessage();
                         msg.Deserialize((OSDMap)result);
 
-                        if (msg.Request is ObjectMediaResponse)
+                        if (msg.Request is ObjectMediaResponse response)
                         {
-                            ObjectMediaResponse response = (ObjectMediaResponse)msg.Request;
-
                             if (Client.Settings.OBJECT_TRACKING)
                             {
-                                Primitive prim = sim.ObjectsPrimitives.Find((Primitive p) => { return p.ID == primID; });
+                                Primitive prim = sim.ObjectsPrimitives.Find((Primitive p) => p.ID == primID);
                                 if (prim != null)
                                 {
                                     prim.MediaVersion = response.Version;
@@ -1781,7 +1781,7 @@ namespace OpenMetaverse
                         }
                     };
 
-                request.BeginGetResponse(req.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+                request.PostRequestAsync(req.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
             }
             else
             {
@@ -2111,7 +2111,7 @@ namespace OpenMetaverse
                         EventHandler<PrimEventArgs> handler = m_ObjectUpdate;
                         if (handler != null)
                         {
-                            WorkPool.QueueUserWorkItem(delegate(object o)
+                            ThreadPool.QueueUserWorkItem(delegate(object o)
                             { handler(this, new PrimEventArgs(simulator, prim, update.RegionData.TimeDilation, isNewObject, attachment)); });
                         }
                         //OnParticleUpdate handler replacing decode particles, PCode.Particle system appears to be deprecated this is a fix
@@ -2332,7 +2332,7 @@ namespace OpenMetaverse
                     EventHandler<TerseObjectUpdateEventArgs> handler = m_TerseObjectUpdate;
                     if (handler != null)
                     {
-                        WorkPool.QueueUserWorkItem(delegate(object o)
+                        ThreadPool.QueueUserWorkItem(delegate(object o)
                         { handler(this, new TerseObjectUpdateEventArgs(simulator, obj, update, terse.RegionData.TimeDilation)); });
                     }
 
@@ -2806,7 +2806,7 @@ namespace OpenMetaverse
                 if (Client.Settings.OBJECT_TRACKING)
                 {
                     Primitive findPrim = simulator.ObjectsPrimitives.Find(
-                        delegate(Primitive prim) { return prim.ID == props.ObjectID; });
+                        prim => prim.ID == props.ObjectID);
 
                     if (findPrim != null)
                     {
@@ -2856,7 +2856,7 @@ namespace OpenMetaverse
             if (Client.Settings.OBJECT_TRACKING)
             {
                 Primitive findPrim = simulator.ObjectsPrimitives.Find(
-                        delegate(Primitive prim) { return prim.ID == op.ObjectData.ObjectID; });
+                    prim => prim.ID == op.ObjectData.ObjectID);
 
                 if (findPrim != null)
                 {

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2006-2016, openmetaverse.co
+ * Copyright (c) 2021, Sjofn LLC.
  * All rights reserved.
  *
  * - Redistribution and use in source and binary forms, with or without 
@@ -28,7 +29,6 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
-using OpenMetaverse.Imaging;
 using OpenMetaverse.Assets;
 
 namespace OpenMetaverse.GUI
@@ -43,9 +43,6 @@ namespace OpenMetaverse.GUI
         private UUID _MapImageID;
         private GridClient _Client;
         private Image _MapLayer;
-        //warning CS0414: The private field `OpenMetaverse.GUI.MiniMap._MousePosition' is assigned but its value is never used
-        //private Point _MousePosition;
-        ToolTip _ToolTip;
 
         /// <summary>
         /// Gets or sets the GridClient associated with this control
@@ -71,13 +68,6 @@ namespace OpenMetaverse.GUI
         public MiniMap(GridClient client) : this ()
         {
             InitializeClient(client);
-
-            _ToolTip = new ToolTip();
-            _ToolTip.Active = true;
-            _ToolTip.AutomaticDelay = 1;
-
-            this.MouseHover += new System.EventHandler(MiniMap_MouseHover);
-            this.MouseMove += new MouseEventHandler(MiniMap_MouseMove);
         }
 
         /// <summary>Sets the map layer to the specified bitmap image</summary>
@@ -104,6 +94,7 @@ namespace OpenMetaverse.GUI
         private void InitializeClient(GridClient client)
         {
             _Client = client;
+            FetchMapLayer();
             _Client.Grid.CoarseLocationUpdate += Grid_CoarseLocationUpdate;
             _Client.Network.SimChanged += Network_OnCurrentSimChanged;
         }
@@ -115,25 +106,29 @@ namespace OpenMetaverse.GUI
 
         private void UpdateMiniMap(Simulator sim)
         {
-            if (!this.IsHandleCreated) return;
+            if (!this.IsHandleCreated) { return; }
 
-            if (this.InvokeRequired) this.BeginInvoke((MethodInvoker)delegate { UpdateMiniMap(sim); });
+            if (this.InvokeRequired)
+            {
+                this.BeginInvoke((MethodInvoker)delegate { UpdateMiniMap(sim); });
+            }
             else
             {
                 if (_MapLayer == null)
+                {
                     SetMapLayer(null);
-
+                }
                 Bitmap bmp = (Bitmap)_MapLayer.Clone();
                 Graphics g = Graphics.FromImage(bmp);
 
                 Vector3 myCoarsePos;
 
-                if (!sim.AvatarPositions.TryGetValue(Client.Self.AgentID, out myCoarsePos)) return;
+                if (!sim.AvatarPositions.TryGetValue(Client.Self.AgentID, out myCoarsePos)) { return; }
 
                 int i = 0;
 
                 _Client.Network.CurrentSim.AvatarPositions.ForEach(
-                    delegate(KeyValuePair<UUID, Vector3> coarse)
+                    delegate (KeyValuePair<UUID, Vector3> coarse)
                     {
                         int x = (int)coarse.Value.X;
                         int y = 255 - (int)coarse.Value.Y;
@@ -147,7 +142,7 @@ namespace OpenMetaverse.GUI
                             Pen penColor;
                             Brush brushColor;
 
-                            if (Client.Network.CurrentSim.ObjectsAvatars.Find(delegate(Avatar av) { return av.ID == coarse.Key; }) != null)
+                            if (Client.Network.CurrentSim.ObjectsAvatars.Find(av => av.ID == coarse.Key) != null)
                             {
                                 brushColor = Brushes.PaleGreen;
                                 penColor = Pens.Green;
@@ -183,27 +178,18 @@ namespace OpenMetaverse.GUI
                 );
 
                 g.DrawImage(bmp, 0, 0);
-                this.Image = (System.Drawing.Image)(object)bmp; // *HACK:
+                Image = bmp;
             }
-        }
-
-        void MiniMap_MouseHover(object sender, System.EventArgs e)
-        {
-            _ToolTip.SetToolTip(this, "test");
-            _ToolTip.Show("test", this);
-            //TODO: tooltip popup with closest avatar's name, if within range
-        }
-
-        void MiniMap_MouseMove(object sender, MouseEventArgs e)
-        {
-            _ToolTip.Hide(this);
-            //warning CS0414: The private field `OpenMetaverse.GUI.MiniMap._MousePosition' is assigned but its value is never used
-            //_MousePosition = e.Location;
         }
 
         void Network_OnCurrentSimChanged(object sender, SimChangedEventArgs e)
         {
-            if (_Client.Network.Connected) return;
+            FetchMapLayer();
+        }
+        
+        private void FetchMapLayer()
+        {
+            if (!_Client.Network.Connected) { return; }
 
             GridRegion region;
             if (Client.Grid.GetGridRegion(Client.Network.CurrentSim.Name, GridLayerType.Objects, out region))
@@ -211,16 +197,21 @@ namespace OpenMetaverse.GUI
                 SetMapLayer(null);
 
                 _MapImageID = region.MapImageID;
-                ManagedImage nullImage;
 
-                Client.Assets.RequestImage(_MapImageID, ImageType.Baked, 
-                    delegate(TextureRequestState state, AssetTexture asset)
+                Client.Assets.RequestImage(_MapImageID, ImageType.Baked,
+                    delegate (TextureRequestState state, AssetTexture asset)
+                    {
+                        if (state == TextureRequestState.Finished)
                         {
-                            if(state == TextureRequestState.Finished)
-                                OpenJPEG.DecodeToImage(asset.AssetData, out nullImage, out _MapLayer);
-                        });
+                            using (var reader = new OpenJpegDotNet.IO.Reader(asset.AssetData))
+                            {
+                                if (!reader.ReadHeader()) { return; }
+                                _MapLayer = reader.DecodeToBitmap();
+                            }
+                        }
+                    });
             }
-        }       
+        }
 
     }
 }

@@ -1,20 +1,32 @@
 init:
-  - ps: if ($env:APPVEYOR_REPO_TAG -eq "true") { $env:TAG_VERSION = "$env:APPVEYOR_REPO_TAG_NAME.$env:APPVEYOR_BUILD_NUMBER" } else { $env:TAG_VERSION = "v1.4.0.$env:APPVEYOR_BUILD_NUMBER-alpha" }
+  - ps: if ($env:APPVEYOR_REPO_TAG -eq "true") { $env:TAG_VERSION = "$env:APPVEYOR_REPO_TAG_NAME.$env:APPVEYOR_BUILD_NUMBER" } else { $env:TAG_VERSION = "v1.9.0.$env:APPVEYOR_BUILD_NUMBER-alpha" }
   - ps: $env:TAG_VERSION = $env:TAG_VERSION -replace 'v',''
   - ps: Write-Host "Setting version to '$env:TAG_VERSION'"
   - ps: Update-AppveyorBuild -Version "$env:TAG_VERSION"
 
-image: Visual Studio 2017
-
-configuration: Release
-
 environment:
+  matrix:
+  - job_name: Windows Build
+    platform: x64
+    appveyor_build_worker_image: Visual Studio 2019
+    configuration: Release
+  - job_name: MacOS Build
+    platform: x64
+    appveyor_build_worker_image: macos
+    configuration: ReleaseNoGui
+
   LMVTestAgentUsername: SecretAgentTest Resident
   LMVTestAgentPassword:
     secure: bOoXrGfLiHjZlCG1tJ+nDQ==
+  PfxDownloadUrl:
+    secure: 6zETilPjqhwgznp0rOyu2lloNy/uIU0coJBWCW+ADBiofQTU8ZuU3BCIEifEPI1R
+  PfxDownloadPasswd:
+    secure: qzHJldnavMFT8+Cm2eXndg==
+  PfxPassword:
+    secure: +vWSGzLkiBGVIxfPb+iRtD+/maQjI2d92hN4PoNAxMc=
 
 pull_requests:
-  do_not_increment_build_number: true
+  do_not_increment_build_number: false
 
 nuget:
   disable_publish_on_pr: true
@@ -37,14 +49,47 @@ dotnet_csproj:
   package_version: '{version}'
 
 before_build:
+  - dotnet --info
   - nuget restore LibreMetaverse.sln
 
-
+artifacts:
+  - path: 'nuget_libraries.zip'
+    name: 'Nuget Library Archive'
+    type: Auto
 
 deploy:
   - provider: NuGet
     name: nuget_release
     api_key:
-      secure: WAEp9wQu4tWKiMdcfog7FWpzk7rPou8flMCYlmYy3mZ+thKwmG1ht4o4mmEE6ZLs
-    skip_symbols: true
+      secure: Mvs+45lPmiSYC9hv3AqdKWJVEzA5B5w0iU2IUCRz2/cxow/s00suGcO326h4Gjt7
     artifact: /.*LibreMetaverse.*\.nupkg/
+    skip_symbols: true
+    draft: false
+    prerelease: false
+    on:
+      job_name: Windows build
+      APPVEYOR_REPO_TAG: true
+  - provider: GitHub
+    name: github_releases
+    description: Release v$(appveyor_build_version)
+    tag: $(appveyor_build_version)
+    auth_token:
+      secure: lzcaOIXHRZG5WwFThR/DpNiVFh/q4zVis8YcLkmXhJHjFsq8tZgewzVhTmopZhjW
+    artifact: /.*LibreMetaverse.*\.nupkg/
+    skip_symbols: true
+    draft: false
+    prerelease: false
+    on:
+      job_name: Windows build
+      APPVEYOR_REPO_TAG: true
+
+for:
+-
+  matrix:
+    only:
+      - job_name: Windows Build
+
+  after_build:
+    - ps: util/InstallRemotePfx.ps1 -PfxDownloadUrl $env:PfxDownloadUrl -PfxDownloadUser AppVeyor -PfxDownloadPasswd $env:PfxDownloadPasswd -PfxPasswd $env:PfxPassword
+    - ps: util/SignPackages.ps1 -PfxPasswd $env:PfxPassword
+    - ps: Get-ChildItem -Filter "*.nupkg" -Path "C:\Users\appveyor\AppData\Local\Temp\" -recurse | Compress-Archive -DestinationPath "nuget_libraries.zip" -Verbose

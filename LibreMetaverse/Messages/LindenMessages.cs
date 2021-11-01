@@ -1,5 +1,6 @@
 ﻿/*
  * Copyright (c) 2006-2016, openmetaverse.co
+ * Copyright (c) 2021, Sjofn LLC
  * All rights reserved.
  *
  * - Redistribution and use in source and binary forms, with or without 
@@ -4442,7 +4443,7 @@ namespace OpenMetaverse.Messages.Linden
             {
                 Objects = new Object[array.Count];
 
-                for (int i = 0; i < array.Count; i++)
+                for (int i = 0; i < array.Count; ++i)
                 {
                     Object obj = new Object();
                     OSDMap objMap = array[i] as OSDMap;

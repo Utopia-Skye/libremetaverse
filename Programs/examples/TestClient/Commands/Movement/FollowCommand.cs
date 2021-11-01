@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using OpenMetaverse;
 using OpenMetaverse.Packets;
@@ -23,10 +24,8 @@ namespace OpenMetaverse.TestClient
         public override string Execute(string[] args, UUID fromAgentID)
 		{
             // Construct the target name from the passed arguments
-			string target = String.Empty;
-			for (int ct = 0; ct < args.Length; ct++)
-				target = target + args[ct] + " ";
-			target = target.TrimEnd();
+			string target = args.Aggregate(String.Empty, (current, t) => current + t + " ");
+            target = target.TrimEnd();
 
             if (target.Length == 0 || target == "off")
             {
@@ -37,10 +36,11 @@ namespace OpenMetaverse.TestClient
             }
             else
             {
-                if (Follow(target))
-                    return "Following " + target;
-                else
-                    return "Unable to follow " + target + ".  Client may not be able to see that avatar.";
+                if (Follow(target)) {
+                    return $"Following {target}.";
+                } else {
+                    return $"Unable to follow {target}. Client may not be able to see the target avatar.";
+                }
             }
 		}
 
@@ -48,13 +48,10 @@ namespace OpenMetaverse.TestClient
         {
             lock (Client.Network.Simulators)
             {
-                for (int i = 0; i < Client.Network.Simulators.Count; i++)
+                foreach (var sim in Client.Network.Simulators)
                 {
-                    Avatar target = Client.Network.Simulators[i].ObjectsAvatars.Find(
-                        delegate(Avatar avatar)
-                        {
-                            return avatar.Name == name;
-                        }
+                    Avatar target = sim.ObjectsAvatars.Find(
+                        avatar => avatar.Name == name
                     );
 
                     if (target != null)
@@ -82,15 +79,15 @@ namespace OpenMetaverse.TestClient
                 // Find the target position
                 lock (Client.Network.Simulators)
                 {
-                    for (int i = 0; i < Client.Network.Simulators.Count; i++)
+                    foreach (var t in Client.Network.Simulators)
                     {
                         Avatar targetAv;
 
-                        if (Client.Network.Simulators[i].ObjectsAvatars.TryGetValue(targetLocalID, out targetAv))
+                        if (t.ObjectsAvatars.TryGetValue(targetLocalID, out targetAv))
                         {
                             float distance = 0.0f;
 
-                            if (Client.Network.Simulators[i] == Client.Network.CurrentSim)
+                            if (t == Client.Network.CurrentSim)
                             {
                                 distance = Vector3.Distance(targetAv.Position, Client.Self.SimPosition);
                             }
@@ -102,7 +99,7 @@ namespace OpenMetaverse.TestClient
                             if (distance > DISTANCE_BUFFER)
                             {
                                 uint regionX, regionY;
-                                Utils.LongToUInts(Client.Network.Simulators[i].Handle, out regionX, out regionY);
+                                Utils.LongToUInts(t.Handle, out regionX, out regionY);
 
                                 double xTarget = (double)targetAv.Position.X + (double)regionX;
                                 double yTarget = (double)targetAv.Position.Y + (double)regionY;
@@ -131,11 +128,14 @@ namespace OpenMetaverse.TestClient
             Packet packet = e.Packet;
             
             AlertMessagePacket alert = (AlertMessagePacket)packet;
-            string message = Utils.BytesToString(alert.AlertData.Message);
-
-            if (message.Contains("Autopilot cancel"))
+            if (alert.AlertInfo.Length > 0)
             {
-                Logger.Log("FollowCommand: " + message, Helpers.LogLevel.Info, Client);
+                string id = Utils.BytesToString(alert.AlertInfo[0].Message);
+                if (id == "AutopilotCanceled")
+                {
+                    Logger.Log("FollowCommand: " + Utils.BytesToString(alert.AlertData.Message),
+                        Helpers.LogLevel.Info, Client);
+                }
             }
         }
     }

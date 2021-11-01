@@ -172,9 +172,7 @@ namespace OpenMetaverse
                 "EnvironmentSettings",
                 "EstateChangeInfo",
                 "EventQueueGet",
-                "FacebookConnect",
-                "FlickrConnect",
-                "TwitterConnect",
+                "ExtEnvironment",
                 "FetchLib2",
                 "FetchLibDescendents2",
                 "FetchInventory2",
@@ -193,6 +191,7 @@ namespace OpenMetaverse
                 "IsExperienceAdmin",
                 "IsExperienceContributor",
                 "RegionExperiences",
+                "ExperienceQuery",
                 "GetMesh",
                 "GetMesh2",
                 "GetMetadata",
@@ -221,7 +220,6 @@ namespace OpenMetaverse
                 "RemoteParcelRequest",
                 "RenderMaterials",
                 "RequestTextureDownload",
-                "RequiredVoiceVersion",
                 "ResourceCostSelected",
                 "RetrieveNavMeshSrc",
                 "SearchStatRequest",
@@ -249,6 +247,7 @@ namespace OpenMetaverse
                 "UploadBakedTexture",
                 "UserInfo",
                 "ViewerAsset",
+                "ViewerBenefits",
                 "ViewerMetrics",
                 "ViewerStartAuction",
                 "ViewerStats",
@@ -259,7 +258,7 @@ namespace OpenMetaverse
 
             _SeedRequest = new CapsClient(new Uri(_SeedCapsURI), "SeedCaps");
             _SeedRequest.OnComplete += SeedRequestCompleteHandler;
-            _SeedRequest.BeginGetResponse(req, OSDFormat.Xml, Simulator.Client.Settings.CAPS_TIMEOUT);
+            _SeedRequest.PostRequestAsync(req, OSDFormat.Xml, Simulator.Client.Settings.CAPS_TIMEOUT);
         }
 
         private void SeedRequestCompleteHandler(CapsClient client, OSD result, Exception error)
@@ -330,24 +329,26 @@ namespace OpenMetaverse
             {
                 Logger.Log("No Message handler exists for event " + eventName + ". Unable to decode. Will try Generic Handler next", 
                     Helpers.LogLevel.Warning);
-                Logger.Log("Please report this information at https://radegast.life/bugs/issue-entry/: \n" + body, 
+                Logger.Log("Please report this information at https://radegast.life/bugs/issue-entry/: " + Environment.NewLine + body, 
                     Helpers.LogLevel.Debug);
 
                 // try generic decoder next which takes a caps event and tries to match it to an existing packet
                 if (body.Type == OSDType.Map)
                 {
-                    OSDMap map = (OSDMap)body;
+                    OSDMap map = body;
                     Packet packet = Packet.BuildPacket(eventName, map);
                     if (packet != null)
                     {
-                        NetworkManager.IncomingPacket incomingPacket;
-                        incomingPacket.Simulator = Simulator;
-                        incomingPacket.Packet = packet;
+                        var incomingPacket = new NetworkManager.IncomingPacket
+                        {
+                            Simulator = Simulator,
+                            Packet = packet
+                        };
 
-                        Logger.DebugLog($"Serializing " + packet.Type + " capability with generic handler", 
+                        Logger.DebugLog("Serializing " + packet.Type + " capability with generic handler", 
                             Simulator.Client);
 
-                        Simulator.Client.Network.PacketInbox.Enqueue(incomingPacket);
+                        Simulator.Client.Network.EnqueueIncoming(incomingPacket);
                     }
                     else
                     {

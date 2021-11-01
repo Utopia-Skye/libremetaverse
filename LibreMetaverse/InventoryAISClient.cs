@@ -1,9 +1,34 @@
-﻿using System;
+/*
+ * Copyright (c) 2019-2021, Sjofn LLC
+ * All rights reserved.
+ *
+ * - Redistribution and use in source and binary forms, with or without
+ *   modification, are permitted provided that the following conditions are met:
+ *
+ * - Redistributions of source code must retain the above copyright notice, this
+ *   list of conditions and the following disclaimer.
+ * - Neither the name of the openmetaverse.co nor the names
+ *   of its contributors may be used to endorse or promote products derived from
+ *   this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+
+using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Linq;
 using System.Net.Http;
-using System.Net.Http.Headers;
+using System.Text;
 using System.Threading.Tasks;
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
@@ -24,7 +49,7 @@ namespace LibreMetaverse
         {
             Client = client;
             httpClient.DefaultRequestHeaders.Accept.Clear();
-            httpClient.DefaultRequestHeaders.Add("User-Agent", "LibreMetaverse AIS Client");
+            httpClient.DefaultRequestHeaders.Add("User-Agent", $"{Settings.USER_AGENT} AIS Client");
         }
 
         public bool IsAvailable => (Client.Network.CurrentSim.Caps != null &&
@@ -38,34 +63,58 @@ namespace LibreMetaverse
                 Logger.Log("No AIS3 Capability!", Helpers.LogLevel.Warning, Client);
                 return;
             }
+
+            var success = false;
+            InventoryItem item = null;
+
             try
             {
-                UUID tid = UUID.Random();
-                
-                string url = $"{cap}/category/{parentUuid}?tid={tid}";
-                var content = new ByteArrayContent(OSDParser.SerializeLLSDXmlBytes(newInventory));
-                content.Headers.ContentType = MediaTypeHeaderValue.Parse("application/llsd+xml");
-                var req = httpClient.PostAsync(url, content);
-                var reply = await req;
+                var tid = UUID.Random();
 
-                if (reply.IsSuccessStatusCode 
-                    && OSDParser.Deserialize(reply.Content.ReadAsStringAsync().Result) is OSDMap map
-                    && map["_embedded"] is OSDMap embedded)
+                var url = $"{cap}/category/{parentUuid}?tid={tid}";
+
+                if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
                 {
-                    List<InventoryItem> items = !createLink 
-                        ? parseItemsFromResponse((OSDMap)embedded["items"]) 
-                        : parseLinksFromResponse((OSDMap)embedded["links"]);
-                    callback(true, items.First());
+                    success = false;
+
+                    return;
                 }
-                else
+
+                var payload = OSDParser.SerializeLLSDXmlString(newInventory);
+
+                using (var content = new StringContent(payload, Encoding.UTF8, "application/llsd+xml"))
                 {
-                    Logger.Log("Could not create inventory: " + reply.ReasonPhrase, Helpers.LogLevel.Warning);
-                    callback(false, null);
+                    using (var reply = await httpClient.PostAsync(uri, content))
+                    {
+                        success = reply.IsSuccessStatusCode;
+
+                        if (!success)
+                        {
+                            Logger.Log("Could not create inventory: " + reply.ReasonPhrase, Helpers.LogLevel.Warning);
+
+                            return;
+                        }
+
+                        var data = await reply.Content.ReadAsStringAsync();
+
+                        if (OSDParser.Deserialize(data) is OSDMap map && map["_embedded"] is OSDMap embedded)
+                        {
+                            var items = !createLink ?
+                                parseItemsFromResponse((OSDMap)embedded["items"]) :
+                                parseLinksFromResponse((OSDMap)embedded["links"]);
+
+                            item = items.First();
+                        }
+                    }
                 }
             }
             catch (Exception ex)
             {
                 Logger.Log(ex.Message, Helpers.LogLevel.Warning);
+            }
+            finally
+            {
+                callback(success, item);
             }
         }
 
@@ -77,27 +126,43 @@ namespace LibreMetaverse
                 Logger.Log("No AIS3 Capability!", Helpers.LogLevel.Warning, Client);
                 return;
             }
+
+            var success = false;
+
             try
             {
-                UUID tid = UUID.Random();
-                string url = $"{cap}/category/{folderUuid}/links?tid={tid}";
-                var content = new ByteArrayContent(OSDParser.SerializeLLSDXmlBytes(newInventory));
-                content.Headers.ContentType = MediaTypeHeaderValue.Parse("application/llsd+xml");
-                var req = httpClient.PutAsync(url, content);
-                var reply = await req;
-                if (reply.IsSuccessStatusCode)
+                var tid = UUID.Random();
+                var url = $"{cap}/category/{folderUuid}/links?tid={tid}";
+
+                if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
                 {
-                    callback?.Invoke(true);
+                    success = false;
+
+                    return;
                 }
-                else
+
+                var payload = OSDParser.SerializeLLSDXmlString(newInventory);
+
+                using (var content = new StringContent(payload, Encoding.UTF8, "application/llsd+xml"))
                 {
-                    Logger.Log("Could not slam folder: " + reply.ReasonPhrase, Helpers.LogLevel.Warning);
-                    callback?.Invoke(false);
+                    using (var reply = await httpClient.PutAsync(uri, content))
+                    {
+                        success = reply.IsSuccessStatusCode;
+
+                        if (!success)
+                        {
+                            Logger.Log("Could not slam folder: " + reply.ReasonPhrase, Helpers.LogLevel.Warning);
+                        }
+                    }
                 }
             }
             catch (Exception ex)
             {
                 Logger.Log(ex.Message, Helpers.LogLevel.Warning);
+            }
+            finally
+            {
+                callback?.Invoke(success);
             }
         }
 
@@ -109,24 +174,37 @@ namespace LibreMetaverse
                 Logger.Log("No AIS3 Capability!", Helpers.LogLevel.Warning, Client);
                 return;
             }
+
+            var success = false;
+
             try
             {
-                string url = $"{cap}/category/{categoryUuid}";
-                var op = httpClient.DeleteAsync(url);
-                var reply = await op;
-                if (reply.IsSuccessStatusCode)
+                var url = $"{cap}/category/{categoryUuid}";
+
+                if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
                 {
-                    callback?.Invoke(true);
+                    success = false;
+
+                    return;
                 }
-                else
+
+                using (var reply = await httpClient.DeleteAsync(uri))
                 {
-                    Logger.Log("Could not remove folder: " + reply.ReasonPhrase, Helpers.LogLevel.Warning);
-                    callback?.Invoke(false);
+                    success = reply.IsSuccessStatusCode;
+
+                    if (!success)
+                    {
+                        Logger.Log("Could not remove folder: " + reply.ReasonPhrase, Helpers.LogLevel.Warning);
+                    }
                 }
             }
             catch (Exception ex)
             {
                 Logger.Log(ex.Message, Helpers.LogLevel.Warning);
+            }
+            finally
+            {
+                callback?.Invoke(success);
             }
         }
 
@@ -138,24 +216,38 @@ namespace LibreMetaverse
                 Logger.Log("No AIS3 Capability!", Helpers.LogLevel.Warning, Client);
                 return;
             }
+
+            var success = false;
+
             try
             {
-                string url = $"{cap}/item/{itemUuid}";
-                var op = httpClient.DeleteAsync(url);
-                var reply = await op;
-                if (reply.IsSuccessStatusCode)
+                var url = $"{cap}/item/{itemUuid}";
+
+                if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
                 {
-                    callback?.Invoke(true);
+                    success = false;
+
+                    return;
                 }
-                else
+
+                using (var reply = await httpClient.DeleteAsync(uri))
                 {
-                    Logger.Log("Could not remove item: " + itemUuid + " " + reply.ReasonPhrase, Helpers.LogLevel.Warning);
-                    callback?.Invoke(false);
+                    success = reply.IsSuccessStatusCode;
+
+                    if (!success)
+                    {
+                        Logger.Log("Could not remove item: " + itemUuid + " " + reply.ReasonPhrase,
+                            Helpers.LogLevel.Warning);
+                    }
                 }
             }
             catch (Exception ex)
             {
                 Logger.Log(ex.Message, Helpers.LogLevel.Warning);
+            }
+            finally
+            {
+                callback?.Invoke(success);
             }
         }
 
@@ -167,34 +259,49 @@ namespace LibreMetaverse
                 Logger.Log("No AIS3 Capability!", Helpers.LogLevel.Warning, Client);
                 return;
             }
+
+            var success = false;
+
             try
             {
                 UUID tid = UUID.Random();
-                string url = $"{cap}/category/{sourceUuid}?tid={tid}";
-                if (copySubfolders)
-                    url += ",depth=0";
 
-                HttpRequestMessage message = new HttpRequestMessage
+                var url = new StringBuilder($"{cap}/category/{sourceUuid}?tid={tid}");
+
+                if (copySubfolders)
+                    url.Append(",depth=0");
+
+                if (!Uri.TryCreate(url.ToString(), UriKind.Absolute, out var uri))
                 {
-                    RequestUri = new Uri(url),
-                    Method = new HttpMethod("COPY")
-                };
-                message.Headers.Add("Destination", destUuid.ToString());
-                var req = httpClient.SendAsync(message);
-                var reply = await req;
-                if (reply.IsSuccessStatusCode)
-                {
-                    callback?.Invoke(true);
+                    success = false;
+
+                    return;
                 }
-                else
+
+                using (var message = new HttpRequestMessage())
                 {
-                    Logger.Log("Could not copy library folder: " + reply.ReasonPhrase, Helpers.LogLevel.Warning);
-                    callback?.Invoke(false);
+                    message.RequestUri = uri;
+                    message.Method = new HttpMethod("COPY");
+                    message.Headers.Add("Destination", destUuid.ToString());
+
+                    using (var reply = await httpClient.SendAsync(message))
+                    {
+                        success = reply.IsSuccessStatusCode;
+
+                        if (!success)
+                        {
+                            Logger.Log("Could not copy library folder: " + reply.ReasonPhrase, Helpers.LogLevel.Warning);
+                        }
+                    }
                 }
             }
             catch (Exception ex)
             {
                 Logger.Log(ex.Message, Helpers.LogLevel.Warning);
+            }
+            finally
+            {
+                callback?.Invoke(success);
             }
         }
 
@@ -206,24 +313,37 @@ namespace LibreMetaverse
                 Logger.Log("No AIS3 Capability!", Helpers.LogLevel.Warning, Client);
                 return;
             }
+
+            var success = false;
+
             try
             {
-                string url = $"{cap}/category/{categoryUuid}/children";
-                var op = httpClient.DeleteAsync(url);
-                var reply = await op;
-                if (reply.IsSuccessStatusCode)
+                var url = $"{cap}/category/{categoryUuid}/children";
+
+                if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
                 {
-                    callback?.Invoke(true, categoryUuid);
+                    success = false;
+
+                    return;
                 }
-                else
+
+                using (var reply = await httpClient.DeleteAsync(uri))
                 {
-                    Logger.Log("Could not purge descendents: " + reply.ReasonPhrase, Helpers.LogLevel.Warning);
-                    callback?.Invoke(false, categoryUuid);
+                    success = reply.IsSuccessStatusCode;
+
+                    if (!success)
+                    {
+                        Logger.Log("Could not purge descendents: " + reply.ReasonPhrase, Helpers.LogLevel.Warning);
+                    }
                 }
             }
             catch (Exception ex)
             {
                 Logger.Log(ex.Message, Helpers.LogLevel.Warning);
+            }
+            finally
+            {
+                callback?.Invoke(success, categoryUuid);
             }
         }
 
@@ -235,31 +355,50 @@ namespace LibreMetaverse
                 Logger.Log("No AIS3 Capability!", Helpers.LogLevel.Warning, Client);
                 return;
             }
+
+            var success = false;
+
             try
             {
-                string url = $"{cap}/category/{categoryUuid}";
-                HttpRequestMessage message = new HttpRequestMessage
+                var url = $"{cap}/category/{categoryUuid}";
+
+                if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
                 {
-                    RequestUri = new Uri(url),
-                    Method = new HttpMethod("PATCH"),
-                    Content = new ByteArrayContent(OSDParser.SerializeLLSDXmlBytes(updates))
-                };
-                message.Content.Headers.ContentType = MediaTypeHeaderValue.Parse("application/llsd+xml");
-                var req = httpClient.SendAsync(message);
-                var reply = await req;
-                if (reply.IsSuccessStatusCode)
-                {
-                    callback?.Invoke(true);
+                    success = false;
+
+                    return;
                 }
-                else
+
+                var method = new HttpMethod("PATCH");
+
+                using (var message = new HttpRequestMessage(method, uri))
                 {
-                    Logger.Log("Could not update folder: " + reply.ReasonPhrase, Helpers.LogLevel.Warning);
-                    callback?.Invoke(false);
+                    var payload = OSDParser.SerializeLLSDXmlString(updates);
+
+                    using (var content = new StringContent(payload, Encoding.UTF8, "application/llsd+xml"))
+                    {
+                        message.Content = content;
+
+                        using (var reply = await httpClient.SendAsync(message))
+                        {
+                            success = reply.IsSuccessStatusCode;
+
+                            if (!success)
+                            {
+                                Logger.Log("Could not update folder: " + reply.ReasonPhrase,
+                                    Helpers.LogLevel.Warning);
+                            }
+                        }
+                    }
                 }
             }
             catch (Exception ex)
             {
                 Logger.Log(ex.Message, Helpers.LogLevel.Warning);
+            }
+            finally
+            {
+                callback?.Invoke(success);
             }
         }
 
@@ -271,31 +410,50 @@ namespace LibreMetaverse
                 Logger.Log("No AIS3 Capability!", Helpers.LogLevel.Warning, Client);
                 return;
             }
+
+            var success = false;
+
             try
             {
-                string url = $"{cap}/item/{itemUuid}";
-                var message = new HttpRequestMessage
+                var url = $"{cap}/item/{itemUuid}";
+
+                if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
                 {
-                    RequestUri = new Uri(url),
-                    Method = new HttpMethod("PATCH"),
-                    Content = new ByteArrayContent(OSDParser.SerializeLLSDXmlBytes(updates))
-                };
-                message.Content.Headers.ContentType = MediaTypeHeaderValue.Parse("application/llsd+xml");
-                var req = httpClient.SendAsync(message);
-                var reply = await req;
-                if (reply.IsSuccessStatusCode)
-                {
-                    callback?.Invoke(true);
+                    success = false;
+
+                    return;
                 }
-                else
+
+                var method = new HttpMethod("PATCH");
+
+                using (var message = new HttpRequestMessage(method, uri))
                 {
-                    Logger.Log("Could not update item: " + reply.ReasonPhrase, Helpers.LogLevel.Warning);
-                    callback?.Invoke(false);
+                    var payload = OSDParser.SerializeLLSDXmlString(updates);
+
+                    using (var content = new StringContent(payload, Encoding.UTF8, "application/llsd+xml"))
+                    {
+                        message.Content = content;
+
+                        using (var reply = await httpClient.SendAsync(message))
+                        {
+                            success = reply.IsSuccessStatusCode;
+
+                            if (!success)
+                            {
+                                Logger.Log("Could not update item: " + reply.ReasonPhrase,
+                                    Helpers.LogLevel.Warning);
+                            }
+                        }
+                    }
                 }
             }
             catch (Exception ex)
             {
                 Logger.Log(ex.Message, Helpers.LogLevel.Warning);
+            }
+            finally
+            {
+                callback?.Invoke(success);
             }
         }
 

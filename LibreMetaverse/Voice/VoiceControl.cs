@@ -34,6 +34,7 @@ using System.Threading;
 
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
+using OpenMetaverse.Http;
 
 namespace OpenMetaverse.Voice
 {
@@ -79,6 +80,7 @@ namespace OpenMetaverse.Voice
 
         // Position update thread
         private Thread posThread;
+        private CancellationTokenSource posTokenSource;
         private ManualResetEvent posRestart;
         public GridClient Client;
         private VoicePosition position;
@@ -133,7 +135,12 @@ namespace OpenMetaverse.Voice
         {
             // Start the background thread
             if (posThread != null && posThread.IsAlive)
-                posThread.Abort();
+            {
+                posRestart.Set();
+                posTokenSource.Cancel();
+            }
+            
+            posTokenSource = new CancellationTokenSource();
             posThread = new Thread(new ThreadStart(PositionThreadBody));
             posThread.Name = "VoicePositionUpdate";
             posThread.IsBackground = true;
@@ -252,10 +259,11 @@ namespace OpenMetaverse.Voice
             // Stop the background thread
             if (posThread != null)
             {
-                PosUpdating(false);
-
                 if (posThread.IsAlive)
-                    posThread.Abort();
+                {
+                    posRestart.Set();
+                    posTokenSource.Cancel();
+                }
                 posThread = null;
             }
 
@@ -345,13 +353,12 @@ namespace OpenMetaverse.Voice
 
         void RequestVoiceProvision(System.Uri cap)
         {
-            Http.CapsClient capClient = new Http.CapsClient(cap, "ReqVoiceProvision");
+            CapsClient capClient = new Http.CapsClient(cap, "ReqVoiceProvision");
             capClient.OnComplete += cClient_OnComplete;
-            OSD postData = new OSD();
 
             // STEP 0
             Logger.Log("Requesting voice capability", Helpers.LogLevel.Info);
-            capClient.BeginGetResponse(postData, OSDFormat.Xml, 10000);
+            capClient.PostRequestAsync(new OSD(), OSDFormat.Xml, 10000);
         }
 
         /// <summary>
@@ -879,13 +886,12 @@ namespace OpenMetaverse.Voice
         {
             Logger.Log("Requesting region voice info", Helpers.LogLevel.Info);
 
-            parcelCap = new OpenMetaverse.Http.CapsClient(cap, "RequestParcelInfo");
+            parcelCap = new CapsClient(cap, "RequestParcelInfo");
             parcelCap.OnComplete +=
                 pCap_OnComplete;
-            OSD postData = new OSD();
 
             currentParcelCap = cap;
-            parcelCap.BeginGetResponse(postData, OSDFormat.Xml, 10000);
+            parcelCap.PostRequestAsync(new OSD(), OSDFormat.Xml, 10000);
         }
 
         /// <summary>
@@ -997,9 +1003,12 @@ namespace OpenMetaverse.Voice
 
         private void PositionThreadBody()
         {
+            var token = posTokenSource.Token;
             while (true)
             {
                 posRestart.WaitOne();
+                token.ThrowIfCancellationRequested();
+                
                 Thread.Sleep(1500);
                 UpdatePosition(Client.Self);
             }

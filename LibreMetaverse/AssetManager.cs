@@ -204,7 +204,6 @@ namespace OpenMetaverse
         internal ManualResetEvent HeaderReceivedEvent = new ManualResetEvent(false);
 
         public AssetDownload()
-            : base()
         {
             nextPacket = 0;
             outOfOrderPackets = new InternalDictionary<int, byte[]>();
@@ -445,7 +444,7 @@ namespace OpenMetaverse
 
         private GridClient Client;
 
-        private Dictionary<UUID, Transfer> Transfers = new Dictionary<UUID, Transfer>();
+        private readonly Dictionary<UUID, Transfer> Transfers = new Dictionary<UUID, Transfer>();
 
         private AssetUpload PendingUpload;
         private object PendingUploadLock = new object();
@@ -497,8 +496,10 @@ namespace OpenMetaverse
                     return "callcard";
                 case AssetType.Landmark:
                     return "landmark";
+#pragma warning disable 618
                 case AssetType.Script:
                     return "script";
+#pragma warning restore 618
                 case AssetType.Clothing:
                     return "clothing";
                 case AssetType.Object:
@@ -689,6 +690,7 @@ namespace OpenMetaverse
                         {
                             transfer.Success = false;
                             transfer.Status = StatusCode.Error;
+                            callback(transfer, null);
                         }
 
                     }
@@ -792,11 +794,11 @@ namespace OpenMetaverse
         }
 
         public void RequestInventoryAsset(UUID assetID, UUID itemID, UUID taskID, UUID ownerID, AssetType assetType,
-            bool priority, AssetReceivedCallback callback)
+            bool priority, UUID transferID, AssetReceivedCallback callback)
         {
             AssetDownload transfer = new AssetDownload
             {
-                ID = UUID.Random(),
+                ID = transferID,
                 AssetID = assetID,
                 AssetType = assetType,
                 Priority = 100.0f + (priority ? 1.0f : 0.0f),
@@ -844,8 +846,6 @@ namespace OpenMetaverse
         /// </summary>
         /// <param name="assetID">Use UUID.Zero if you do not have the 
         /// asset ID but have all the necessary permissions</param>
-        /// <param name="assetType"></param>
-        /// <param name="priority">Whether to prioritize this asset download or not</param>
         /// <param name="transfer"></param>
         /// <param name="callback"></param>
         private void RequestInventoryAssetHTTP(UUID assetID, AssetDownload transfer, AssetReceivedCallback callback)
@@ -930,9 +930,9 @@ namespace OpenMetaverse
             Client.Network.SendPacket(request, transfer.Simulator);
         }
 
-        public void RequestInventoryAsset(InventoryItem item, bool priority, AssetReceivedCallback callback)
+        public void RequestInventoryAsset(InventoryItem item, bool priority, UUID transferID, AssetReceivedCallback callback)
         {
-            RequestInventoryAsset(item.AssetUUID, item.UUID, UUID.Zero, item.OwnerID, item.AssetType, priority, callback);
+            RequestInventoryAsset(item.AssetUUID, item.UUID, UUID.Zero, item.OwnerID, item.AssetType, priority, transferID, callback);
         }
 
         public void RequestEstateAsset()
@@ -1037,7 +1037,7 @@ namespace OpenMetaverse
                     String.Format("Beginning asset upload [Single Packet], ID: {0}, AssetID: {1}, Size: {2}",
                     upload.ID.ToString(), upload.AssetID.ToString(), upload.Size), Helpers.LogLevel.Info, Client);
 
-                Transfers[upload.ID] = upload;
+                lock (Transfers) Transfers[upload.ID] = upload;
 
                 // The whole asset will fit in this packet, makes things easy
                 request.AssetBlock.AssetData = data;
@@ -1126,7 +1126,7 @@ namespace OpenMetaverse
                                             Logger.Log("Bake upload failed during asset upload", Helpers.LogLevel.Warning, Client);
                                             callback(UUID.Zero);
                                         };
-                                    upload.BeginGetResponse(textureData, "application/octet-stream", Client.Settings.CAPS_TIMEOUT);
+                                    upload.PostRequestAsync(textureData, "application/octet-stream", Client.Settings.CAPS_TIMEOUT);
                                     return;
                                 }
                             }
@@ -1135,13 +1135,13 @@ namespace OpenMetaverse
                         Logger.Log("Bake upload failed during uploader retrieval", Helpers.LogLevel.Warning, Client);
                         callback(UUID.Zero);
                     };
-                request.BeginGetResponse(new OSDMap(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+                request.PostRequestAsync(new OSDMap(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
             }
             else
             {
                 Logger.Log("UploadBakedTexture not available, falling back to UDP method", Helpers.LogLevel.Info, Client);
 
-                WorkPool.QueueUserWorkItem(
+                ThreadPool.QueueUserWorkItem(
                     delegate(object o)
                     {
                         UUID transactionID = UUID.Random();
@@ -1663,13 +1663,15 @@ namespace OpenMetaverse
         /// <param name="e">The EventArgs object containing the packet data</param>
         protected void TransferInfoHandler(object sender, PacketReceivedEventArgs e)
         {
-            TransferInfoPacket info = (TransferInfoPacket)e.Packet;
+            var info = (TransferInfoPacket)e.Packet;
             Transfer transfer;
-            AssetDownload download;
 
-            if (Transfers.TryGetValue(info.TransferInfo.TransferID, out transfer))
+            bool success;
+            lock (Transfers) success = Transfers.TryGetValue(info.TransferInfo.TransferID, out transfer);
+
+            if (success)
             {
-                download = (AssetDownload)transfer;
+                var download = (AssetDownload)transfer;
 
                 if (download.Callback == null) return;
 
@@ -1744,89 +1746,91 @@ namespace OpenMetaverse
             TransferPacketPacket asset = (TransferPacketPacket)e.Packet;
             Transfer transfer;
 
-            if (Transfers.TryGetValue(asset.TransferData.TransferID, out transfer))
+            bool success;
+            lock (Transfers) success = Transfers.TryGetValue(asset.TransferData.TransferID, out transfer);
+
+            // skip if we couldn't find the transfer
+            if (!success) return;
+            
+            var download = (AssetDownload)transfer;
+            if (download.Size == 0)
             {
-                AssetDownload download = (AssetDownload)transfer;
+                Logger.DebugLog("TransferPacket received ahead of the transfer header, blocking...", Client);
+
+                // We haven't received the header yet, block until it's received or times out
+                download.HeaderReceivedEvent.WaitOne(TRANSFER_HEADER_TIMEOUT, false);
 
                 if (download.Size == 0)
                 {
-                    Logger.DebugLog("TransferPacket received ahead of the transfer header, blocking...", Client);
+                    Logger.Log("Timed out while waiting for the asset header to download for " +
+                               download.ID.ToString(), Helpers.LogLevel.Warning, Client);
 
-                    // We haven't received the header yet, block until it's received or times out
-                    download.HeaderReceivedEvent.WaitOne(TRANSFER_HEADER_TIMEOUT, false);
+                    // Abort the transfer
+                    TransferAbortPacket abort = new TransferAbortPacket();
+                    abort.TransferInfo.ChannelType = (int)download.Channel;
+                    abort.TransferInfo.TransferID = download.ID;
+                    Client.Network.SendPacket(abort, download.Simulator);
 
-                    if (download.Size == 0)
-                    {
-                        Logger.Log("Timed out while waiting for the asset header to download for " +
-                            download.ID.ToString(), Helpers.LogLevel.Warning, Client);
-
-                        // Abort the transfer
-                        TransferAbortPacket abort = new TransferAbortPacket();
-                        abort.TransferInfo.ChannelType = (int)download.Channel;
-                        abort.TransferInfo.TransferID = download.ID;
-                        Client.Network.SendPacket(abort, download.Simulator);
-
-                        download.Success = false;
-                        lock (Transfers) Transfers.Remove(download.ID);
-
-                        // Fire the event with our transfer that contains Success = false
-                        if (download.Callback != null)
-                        {
-                            try { download.Callback(download, null); }
-                            catch (Exception ex) { Logger.Log(ex.Message, Helpers.LogLevel.Error, Client, ex); }
-                        }
-
-                        return;
-                    }
-                }
-
-                // If packets arrive out of order, we add them to the out of order packet directory
-                // until all previous packets have arrived
-                try
-                {
-                    if (download.nextPacket == asset.TransferData.Packet)
-                    {
-                        byte[] data = asset.TransferData.Data;
-                        do
-                        {
-                            Buffer.BlockCopy(data, 0, download.AssetData, download.Transferred, data.Length);
-                            download.Transferred += data.Length;
-                            download.nextPacket++;
-                        } while (download.outOfOrderPackets.TryGetValue(download.nextPacket, out data));
-                    }
-                    else
-                    {
-                        //Logger.Log(string.Format("Fixing out of order packet {0} when expecting {1}!", asset.TransferData.Packet, download.nextPacket), Helpers.LogLevel.Debug);
-                        download.outOfOrderPackets.Add(asset.TransferData.Packet, asset.TransferData.Data);
-                    }
-                }
-                catch (ArgumentException)
-                {
-                    Logger.Log(String.Format("TransferPacket handling failed. TransferData.Data.Length={0}, AssetData.Length={1}, TransferData.Packet={2}",
-                        asset.TransferData.Data.Length, download.AssetData.Length, asset.TransferData.Packet), Helpers.LogLevel.Error);
-                    return;
-                }
-
-                //Client.DebugLog(String.Format("Transfer packet {0}, received {1}/{2}/{3} bytes for asset {4}",
-                //    asset.TransferData.Packet, asset.TransferData.Data.Length, transfer.Transferred, transfer.Size,
-                //    transfer.AssetID.ToString()));
-
-                // Check if we downloaded the full asset
-                if (download.Transferred >= download.Size)
-                {
-                    Logger.DebugLog("Transfer for asset " + download.AssetID.ToString() + " completed", Client);
-
-                    download.Success = true;
+                    download.Success = false;
                     lock (Transfers) Transfers.Remove(download.ID);
 
-                    // Cache successful asset download
-                    Cache.SaveAssetToCache(download.AssetID, download.AssetData);
-
+                    // Fire the event with our transfer that contains Success = false
                     if (download.Callback != null)
                     {
-                        try { download.Callback(download, WrapAsset(download)); }
+                        try { download.Callback(download, null); }
                         catch (Exception ex) { Logger.Log(ex.Message, Helpers.LogLevel.Error, Client, ex); }
                     }
+
+                    return;
+                }
+            }
+
+            // If packets arrive out of order, we add them to the out of order packet directory
+            // until all previous packets have arrived
+            try
+            {
+                if (download.nextPacket == asset.TransferData.Packet)
+                {
+                    byte[] data = asset.TransferData.Data;
+                    do
+                    {
+                        Buffer.BlockCopy(data, 0, download.AssetData, download.Transferred, data.Length);
+                        download.Transferred += data.Length;
+                        download.nextPacket++;
+                    } while (download.outOfOrderPackets.TryGetValue(download.nextPacket, out data));
+                }
+                else
+                {
+                    //Logger.Log(string.Format("Fixing out of order packet {0} when expecting {1}!", asset.TransferData.Packet, download.nextPacket), Helpers.LogLevel.Debug);
+                    download.outOfOrderPackets.Add(asset.TransferData.Packet, asset.TransferData.Data);
+                }
+            }
+            catch (ArgumentException)
+            {
+                Logger.Log(String.Format("TransferPacket handling failed. TransferData.Data.Length={0}, AssetData.Length={1}, TransferData.Packet={2}",
+                    asset.TransferData.Data.Length, download.AssetData.Length, asset.TransferData.Packet), Helpers.LogLevel.Error);
+                return;
+            }
+
+            //Client.DebugLog(String.Format("Transfer packet {0}, received {1}/{2}/{3} bytes for asset {4}",
+            //    asset.TransferData.Packet, asset.TransferData.Data.Length, transfer.Transferred, transfer.Size,
+            //    transfer.AssetID.ToString()));
+
+            // Check if we downloaded the full asset
+            if (download.Transferred >= download.Size)
+            {
+                Logger.DebugLog("Transfer for asset " + download.AssetID.ToString() + " completed", Client);
+
+                download.Success = true;
+                lock (Transfers) Transfers.Remove(download.ID);
+
+                // Cache successful asset download
+                Cache.SaveAssetToCache(download.AssetID, download.AssetData);
+
+                if (download.Callback != null)
+                {
+                    try { download.Callback(download, WrapAsset(download)); }
+                    catch (Exception ex) { Logger.Log(ex.Message, Helpers.LogLevel.Error, Client, ex); }
                 }
             }
         }
@@ -1867,7 +1871,7 @@ namespace OpenMetaverse
                 upload.Type = (AssetType)request.XferID.VFileType;
 
                 UUID transferID = new UUID(upload.XferID);
-                Transfers[transferID] = upload;
+                lock (Transfers) Transfers[transferID] = upload;
 
                 // Send the first packet containing actual asset data
                 SendNextUploadPacket(upload);
@@ -1879,27 +1883,28 @@ namespace OpenMetaverse
         /// <param name="e">The EventArgs object containing the packet data</param>
         protected void ConfirmXferPacketHandler(object sender, PacketReceivedEventArgs e)
         {
-            ConfirmXferPacketPacket confirm = (ConfirmXferPacketPacket)e.Packet;
+            var confirm = (ConfirmXferPacketPacket)e.Packet;
 
             // Building a new UUID every time an ACK is received for an upload is a horrible
             // thing, but this whole Xfer system is horrible
             UUID transferID = new UUID(confirm.XferID.ID);
             Transfer transfer;
-            AssetUpload upload = null;
 
-            if (Transfers.TryGetValue(transferID, out transfer))
-            {
-                upload = (AssetUpload)transfer;
+            bool success;
+            lock (Transfers) success = Transfers.TryGetValue(transferID, out transfer);
 
-                //Client.DebugLog(String.Format("ACK for upload {0} of asset type {1} ({2}/{3})",
-                //    upload.AssetID.ToString(), upload.Type, upload.Transferred, upload.Size));
+            // skip if we couldn't find the transfer
+            if (!success) return;
+            var upload = (AssetUpload)transfer;
 
-                try { OnUploadProgress(new AssetUploadEventArgs(upload)); }
-                catch (Exception ex) { Logger.Log(ex.Message, Helpers.LogLevel.Error, Client, ex); }
+            //Client.DebugLog(String.Format("ACK for upload {0} of asset type {1} ({2}/{3})",
+            //    upload.AssetID.ToString(), upload.Type, upload.Transferred, upload.Size));
 
-                if (upload.Transferred < upload.Size)
-                    SendNextUploadPacket(upload);
-            }
+            try { OnUploadProgress(new AssetUploadEventArgs(upload)); }
+            catch (Exception ex) { Logger.Log(ex.Message, Helpers.LogLevel.Error, Client, ex); }
+
+            if (upload.Transferred < upload.Size)
+                SendNextUploadPacket(upload);
         }
 
         /// <summary>Process an incoming packet and raise the appropriate events</summary>
@@ -1915,13 +1920,13 @@ namespace OpenMetaverse
 
             if (m_AssetUploadedEvent != null)
             {
-                bool found = false;
-                KeyValuePair<UUID, Transfer> foundTransfer = new KeyValuePair<UUID, Transfer>();
+                var found = false;
+                var foundTransfer = new KeyValuePair<UUID, Transfer>();
 
                 // Xfer system sucks really really bad. Where is the damn XferID?
                 lock (Transfers)
                 {
-                    foreach (KeyValuePair<UUID, Transfer> transfer in Transfers)
+                    foreach (var transfer in Transfers)
                     {
                         if (transfer.Value.GetType() == typeof(AssetUpload))
                         {
@@ -1961,78 +1966,80 @@ namespace OpenMetaverse
         /// <param name="e">The EventArgs object containing the packet data</param>
         protected void SendXferPacketHandler(object sender, PacketReceivedEventArgs e)
         {
-            SendXferPacketPacket xfer = (SendXferPacketPacket)e.Packet;
+            var xfer = (SendXferPacketPacket)e.Packet;
 
             // Lame ulong to UUID conversion, please go away Xfer system
             UUID transferID = new UUID(xfer.XferID.ID);
             Transfer transfer;
-            XferDownload download = null;
 
-            if (Transfers.TryGetValue(transferID, out transfer))
+            bool success;
+            lock (Transfers) success = Transfers.TryGetValue(transferID, out transfer);
+
+            // skip if we couldn't find the transfer
+            if (!success) return;
+            
+            var download = (XferDownload)transfer;
+
+            // Apply a mask to get rid of the "end of transfer" bit
+            uint packetNum = xfer.XferID.Packet & 0x0FFFFFFF;
+
+            // Check for out of order packets, possibly indicating a resend
+            if (packetNum != download.PacketNum)
             {
-                download = (XferDownload)transfer;
-
-                // Apply a mask to get rid of the "end of transfer" bit
-                uint packetNum = xfer.XferID.Packet & 0x0FFFFFFF;
-
-                // Check for out of order packets, possibly indicating a resend
-                if (packetNum != download.PacketNum)
+                if (packetNum == download.PacketNum - 1)
                 {
-                    if (packetNum == download.PacketNum - 1)
-                    {
-                        Logger.DebugLog("Resending Xfer download confirmation for packet " + packetNum, Client);
-                        SendConfirmXferPacket(download.XferID, packetNum);
-                    }
-                    else
-                    {
-                        Logger.Log("Out of order Xfer packet in a download, got " + packetNum + " expecting " + download.PacketNum,
-                            Helpers.LogLevel.Warning, Client);
-                        // Re-confirm the last packet we actually received
-                        SendConfirmXferPacket(download.XferID, download.PacketNum - 1);
-                    }
-
-                    return;
-                }
-
-                if (packetNum == 0)
-                {
-                    // This is the first packet received in the download, the first four bytes are a size integer
-                    // in little endian ordering
-                    byte[] bytes = xfer.DataPacket.Data;
-                    download.Size = (bytes[0] + (bytes[1] << 8) + (bytes[2] << 16) + (bytes[3] << 24));
-                    download.AssetData = new byte[download.Size];
-
-                    Logger.DebugLog("Received first packet in an Xfer download of size " + download.Size);
-
-                    Buffer.BlockCopy(xfer.DataPacket.Data, 4, download.AssetData, 0, xfer.DataPacket.Data.Length - 4);
-                    download.Transferred += xfer.DataPacket.Data.Length - 4;
+                    Logger.DebugLog("Resending Xfer download confirmation for packet " + packetNum, Client);
+                    SendConfirmXferPacket(download.XferID, packetNum);
                 }
                 else
                 {
-                    Buffer.BlockCopy(xfer.DataPacket.Data, 0, download.AssetData, 1000 * (int)packetNum, xfer.DataPacket.Data.Length);
-                    download.Transferred += xfer.DataPacket.Data.Length;
+                    Logger.Log("Out of order Xfer packet in a download, got " + packetNum + " expecting " + download.PacketNum,
+                        Helpers.LogLevel.Warning, Client);
+                    // Re-confirm the last packet we actually received
+                    SendConfirmXferPacket(download.XferID, download.PacketNum - 1);
                 }
 
-                // Increment the packet number to the packet we are expecting next
-                download.PacketNum++;
+                return;
+            }
 
-                // Confirm receiving this packet
-                SendConfirmXferPacket(download.XferID, packetNum);
+            if (packetNum == 0)
+            {
+                // This is the first packet received in the download, the first four bytes are a size integer
+                // in little endian ordering
+                byte[] bytes = xfer.DataPacket.Data;
+                download.Size = (bytes[0] + (bytes[1] << 8) + (bytes[2] << 16) + (bytes[3] << 24));
+                download.AssetData = new byte[download.Size];
 
-                if ((xfer.XferID.Packet & 0x80000000) != 0)
-                {
-                    // This is the last packet in the transfer
-                    if (!String.IsNullOrEmpty(download.Filename))
-                        Logger.DebugLog("Xfer download for asset " + download.Filename + " completed", Client);
-                    else
-                        Logger.DebugLog("Xfer download for asset " + download.VFileID.ToString() + " completed", Client);
+                Logger.DebugLog("Received first packet in an Xfer download of size " + download.Size);
 
-                    download.Success = true;
-                    lock (Transfers) Transfers.Remove(download.ID);
+                Buffer.BlockCopy(xfer.DataPacket.Data, 4, download.AssetData, 0, xfer.DataPacket.Data.Length - 4);
+                download.Transferred += xfer.DataPacket.Data.Length - 4;
+            }
+            else
+            {
+                Buffer.BlockCopy(xfer.DataPacket.Data, 0, download.AssetData, 1000 * (int)packetNum, xfer.DataPacket.Data.Length);
+                download.Transferred += xfer.DataPacket.Data.Length;
+            }
 
-                    try { OnXferReceived(new XferReceivedEventArgs(download)); }
-                    catch (Exception ex) { Logger.Log(ex.Message, Helpers.LogLevel.Error, Client, ex); }
-                }
+            // Increment the packet number to the packet we are expecting next
+            download.PacketNum++;
+
+            // Confirm receiving this packet
+            SendConfirmXferPacket(download.XferID, packetNum);
+
+            if ((xfer.XferID.Packet & 0x80000000) != 0)
+            {
+                // This is the last packet in the transfer
+                if (!String.IsNullOrEmpty(download.Filename))
+                    Logger.DebugLog("Xfer download for asset " + download.Filename + " completed", Client);
+                else
+                    Logger.DebugLog("Xfer download for asset " + download.VFileID.ToString() + " completed", Client);
+
+                download.Success = true;
+                lock (Transfers) Transfers.Remove(download.ID);
+
+                try { OnXferReceived(new XferReceivedEventArgs(download)); }
+                catch (Exception ex) { Logger.Log(ex.Message, Helpers.LogLevel.Error, Client, ex); }
             }
         }
 
@@ -2049,8 +2056,7 @@ namespace OpenMetaverse
 
             lock (Transfers)
             {
-                Transfer transfer;
-                if (Transfers.TryGetValue(transferID, out transfer))
+                if (Transfers.TryGetValue(transferID, out var transfer))
                 {
                     download = (XferDownload)transfer;
                     Transfers.Remove(transferID);

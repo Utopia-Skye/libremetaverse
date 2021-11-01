@@ -23,13 +23,10 @@ namespace OpenMetaverse.TestClient
 
             lock (Client.Network.Simulators)
             {
-                for (int i = 0; i < Client.Network.Simulators.Count; i++)
+                foreach (var sim in Client.Network.Simulators)
                 {
-                    Avatar master = Client.Network.Simulators[i].ObjectsAvatars.Find(
-                        delegate(Avatar avatar)
-                        {
-                            return avatar.ID == Client.MasterKey;
-                        }
+                    Avatar master = sim.ObjectsAvatars.Find(
+                        avatar => avatar.ID == Client.MasterKey
                     );
 
                     if (master != null)

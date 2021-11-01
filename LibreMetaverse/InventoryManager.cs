@@ -29,8 +29,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading;
-using System.Runtime.Serialization;
-using System.Threading.Tasks;
 using OpenMetaverse.Http;
 using OpenMetaverse.Messages.Linden;
 using OpenMetaverse.StructuredData;
@@ -126,6 +124,9 @@ namespace OpenMetaverse
     {
         /// <summary>Used for converting shadow_id to asset_id</summary>
         public static readonly UUID MAGIC_ID = new UUID("3c115e51-04f4-523c-9fa6-98aff1034730");
+
+        /// <summary>Maximum items allowed to give</summary>
+        public static readonly int MAX_GIVE_ITEMS = 66; // viewer code says 66, but 42 in the notification
 
         protected struct InventorySearch
         {
@@ -505,7 +506,7 @@ namespace OpenMetaverse
             InventoryItem fetchedItem = null;
 
             EventHandler<ItemReceivedEventArgs> callback =
-                delegate(object sender, ItemReceivedEventArgs e)
+                delegate (object sender, ItemReceivedEventArgs e)
                 {
                     if (e.Item.UUID == itemID)
                     {
@@ -545,8 +546,7 @@ namespace OpenMetaverse
             if (itemIDs.Count != ownerIDs.Count)
                 throw new ArgumentException("itemIDs and ownerIDs must contain the same number of entries");
 
-            if (Client.Settings.HTTP_INVENTORY &&
-                Client.Network.CurrentSim.Caps != null &&
+            if (Client.Network.CurrentSim.Caps != null &&
                 Client.Network.CurrentSim.Caps.CapabilityURI("FetchInventory2") != null)
             {
                 RequestFetchInventoryCap(itemIDs, ownerIDs);
@@ -587,12 +587,11 @@ namespace OpenMetaverse
             if (itemIDs.Count != ownerIDs.Count)
                 throw new ArgumentException("itemIDs and ownerIDs must contain the same number of entries");
 
-            if (Client.Settings.HTTP_INVENTORY &&
-                Client.Network.CurrentSim.Caps != null &&
+            if (Client.Network.CurrentSim.Caps != null &&
                 Client.Network.CurrentSim.Caps.CapabilityURI("FetchInventory2") != null)
             {
                 CapsClient request = Client.Network.CurrentSim.Caps.CreateCapsClient("FetchInventory2");
-                
+
                 request.OnComplete += (client, result, error) =>
                 {
                     if (error != null) return;
@@ -615,7 +614,7 @@ namespace OpenMetaverse
                     }
                 };
 
-                OSDMap OSDRequest = new OSDMap {["agent_id"] = Client.Self.AgentID};
+                OSDMap OSDRequest = new OSDMap { ["agent_id"] = Client.Self.AgentID };
 
                 OSDArray items = new OSDArray(itemIDs.Count);
                 for (int i = 0; i < itemIDs.Count; i++)
@@ -630,10 +629,102 @@ namespace OpenMetaverse
 
                 OSDRequest["items"] = items;
 
-                request.BeginGetResponse(OSDRequest, OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+                request.PostRequestAsync(OSDRequest, OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+            }
+        }
+        /// <summary>
+        /// FolderContentsWithReply
+        /// Get contents of a folder
+        /// </summary>
+        /// <param name="folder">The <seealso cref="UUID"/> of the folder to search</param>
+        /// <param name="owner">The <seealso cref="UUID"/> of the folders owner</param>
+        /// <param name="folders">true to retrieve folders</param>
+        /// <param name="items">true to retrieve items</param>
+        /// <param name="order">sort order to return results in</param>
+        /// <param name="timeoutMS">a integer representing the number of milliseconds to wait for results</param>
+        /// <param name="fast_loading">when false uses links and does not attempt to get the real object</param>
+        /// <returns>keypair with a status message, and List<seealso cref="InventoryBase"/>
+        /// if the status message is retry you should check again in a bit is is currently loading
+        /// links using RequestFetchInventoryCap
+        /// </returns>
+        public KeyValuePair<string, List<InventoryBase>> FolderContentsWithReply(UUID folder, UUID owner, bool folders, bool items,
+    InventorySortOrder order, int timeoutMS, bool fast_loading)
+        {
+            List<InventoryBase> objects = null;
+            AutoResetEvent fetchEvent = new AutoResetEvent(false);
+
+            void FolderUpdatedCB(object sender, FolderUpdatedEventArgs e)
+            {
+                if (e.FolderID == folder && _Store[folder] is InventoryFolder)
+                {
+                    // InventoryDescendentsHandler only stores DescendentCount if both folders and items are fetched.
+                    if (_Store.GetContents(folder).Count >= ((InventoryFolder)_Store[folder]).DescendentCount)
+                    {
+                        fetchEvent.Set();
+                    }
+                }
+                else
+                {
+                    fetchEvent.Set();
+                }
+            }
+
+            FolderUpdated += FolderUpdatedCB;
+
+            RequestFolderContents(folder, owner, folders, items, order);
+            if (fetchEvent.WaitOne(timeoutMS, false))
+                objects = _Store.GetContents(folder);
+
+            FolderUpdated -= FolderUpdatedCB;
+
+            List<InventoryBase> cleaned_list = new List<InventoryBase>();
+
+            List<UUID> load_items = new List<UUID>();
+            List<UUID> owner_ids = new List<UUID>();
+            if (objects != null)
+            {
+                foreach (InventoryBase o in objects)
+                {
+                    if (o.GetType() != typeof(InventoryFolder))
+                    {
+                        InventoryItem ob = (InventoryItem)o;
+                        if ((ob.IsLink() == true) && (fast_loading == false))
+                        {
+                            if (Store.Items.ContainsKey(ob.AssetUUID) == false)
+                            {
+                                load_items.Add(ob.AssetUUID);
+                                owner_ids.Add(Client.Self.AgentID);
+                            }
+                            else
+                            {
+                                cleaned_list.Add(Client.Inventory.FetchItem(ob.AssetUUID, Client.Self.AgentID, 1000 * 5));
+                            }
+                        }
+                        else
+                        {
+                            cleaned_list.Add(ob);
+                        }
+                    }
+                }
+            }
+
+            if (load_items.Count > 0)
+            {
+                Client.Inventory.RequestFetchInventoryCap(load_items, owner_ids);
+                return new KeyValuePair<string, List<InventoryBase>>("retry", cleaned_list);
+            }
+            else
+            {
+                return new KeyValuePair<string, List<InventoryBase>>("ok", cleaned_list);
             }
         }
 
+        public List<InventoryBase> FolderContents(UUID folder, UUID owner, bool folders, bool items,
+    InventorySortOrder order, int timeoutMS)
+        {
+            return FolderContents(folder, owner, folders, items,
+    order, timeoutMS, false);
+        }
         /// <summary>
         /// Get contents of a folder
         /// </summary>
@@ -643,44 +734,16 @@ namespace OpenMetaverse
         /// <param name="items">true to retrieve items</param>
         /// <param name="order">sort order to return results in</param>
         /// <param name="timeoutMS">a integer representing the number of milliseconds to wait for results</param>
+        /// <param name="fast_loading">when false uses links and does not attempt to get the real object</param>
         /// <returns>A list of inventory items matching search criteria within folder</returns>
         /// <seealso cref="InventoryManager.RequestFolderContents"/>
         /// <remarks>InventoryFolder.DescendentCount will only be accurate if both folders and items are
         /// requested</remarks>
         public List<InventoryBase> FolderContents(UUID folder, UUID owner, bool folders, bool items,
-            InventorySortOrder order, int timeoutMS)
+            InventorySortOrder order, int timeoutMS, bool fast_loading = false)
         {
-            List<InventoryBase> objects = null;
-            AutoResetEvent fetchEvent = new AutoResetEvent(false);
-
-            EventHandler<FolderUpdatedEventArgs> callback =
-                delegate(object sender, FolderUpdatedEventArgs e)
-                {
-                    if (e.FolderID == folder
-                        && _Store[folder] is InventoryFolder)
-                    {
-                        // InventoryDescendentsHandler only stores DescendendCount if both folders and items are fetched.
-                        if (_Store.GetContents(folder).Count >= ((InventoryFolder)_Store[folder]).DescendentCount)
-                        {
-
-                            fetchEvent.Set();
-                        }
-                    }
-                    else
-                    {
-                        fetchEvent.Set();
-                    }
-                };
-
-            FolderUpdated += callback;
-
-            RequestFolderContents(folder, owner, folders, items, order);
-            if (fetchEvent.WaitOne(timeoutMS, false))
-                objects = _Store.GetContents(folder);
-
-            FolderUpdated -= callback;
-
-            return objects;
+            return FolderContentsWithReply(folder, owner, folders, items,
+    order, timeoutMS, fast_loading).Value;
         }
 
         /// <summary>
@@ -689,7 +752,7 @@ namespace OpenMetaverse
         /// <param name="folder">The folder to search</param>
         /// <param name="owner">The folder owners <seealso cref="UUID"/></param>
         /// <param name="folders">true to return <seealso cref="InventoryFolder"/>s contained in folder</param>
-        /// <param name="items">true to return <seealso cref="InventoryItem"/>s containd in folder</param>
+        /// <param name="items">true to return <seealso cref="InventoryItem"/>s contained in folder</param>
         /// <param name="order">the sort order to return items in</param>
         /// <seealso cref="InventoryManager.FolderContents"/>
         public void RequestFolderContents(UUID folder, UUID owner, bool folders, bool items,
@@ -697,8 +760,7 @@ namespace OpenMetaverse
         {
             string cap = owner == Client.Self.AgentID ? "FetchInventoryDescendents2" : "FetchLibDescendents2";
 
-            if (Client.Settings.HTTP_INVENTORY &&
-                Client.Network.CurrentSim.Caps != null &&
+            if (Client.Network.CurrentSim.Caps != null &&
                 Client.Network.CurrentSim.Caps.CapabilityURI(cap) != null)
             {
                 RequestFolderContentsCap(folder, owner, folders, items, order);
@@ -706,13 +768,13 @@ namespace OpenMetaverse
             else // Legacy UDP - REMOVED FROM SECOND LIFE
             {
                 var fetch = new FetchInventoryDescendentsPacket
-                    {
-                        AgentData =
+                {
+                    AgentData =
                         {
                             AgentID = Client.Self.AgentID,
                             SessionID = Client.Self.SessionID
                         },
-                        InventoryData =
+                    InventoryData =
                         {
                             FetchFolders = folders,
                             FetchItems = items,
@@ -720,7 +782,7 @@ namespace OpenMetaverse
                             OwnerID = owner,
                             SortOrder = (int) order
                         }
-                    };
+                };
                 Client.Network.SendPacket(fetch);
             }
         }
@@ -731,7 +793,7 @@ namespace OpenMetaverse
         /// <param name="folderID">The folder to search</param>
         /// <param name="ownerID">The folder owners <seealso cref="UUID"/></param>
         /// <param name="fetchFolders">true to return <seealso cref="InventoryFolder"/>s contained in folder</param>
-        /// <param name="fetchItems">true to return <seealso cref="InventoryItem"/>s containd in folder</param>
+        /// <param name="fetchItems">true to return <seealso cref="InventoryItem"/>s contained in folder</param>
         /// <param name="order">the sort order to return items in</param>
         /// <seealso cref="InventoryManager.FolderContents"/>
         public void RequestFolderContentsCap(UUID folderID, UUID ownerID, bool fetchFolders, bool fetchItems,
@@ -752,7 +814,7 @@ namespace OpenMetaverse
                     OwnerID = ownerID,
                     UUID = folderID
                 };
-                RequestFolderContentsCap(new List<InventoryFolder>() {folder}, url, fetchFolders, fetchItems, order);
+                RequestFolderContentsCap(new List<InventoryFolder>() { folder }, url, fetchFolders, fetchItems, order);
             }
         }
 
@@ -842,8 +904,8 @@ namespace OpenMetaverse
                     }
                     catch (Exception exc)
                     {
-                        Logger.Log($"Failed to fetch inventory descendants: {exc.Message}\n" +
-                                   $"{exc.StackTrace.ToString()}", 
+                        Logger.Log($"Failed to fetch inventory descendants: {exc.Message}" + Environment.NewLine +
+                                   $"{exc.StackTrace}",
                                    Helpers.LogLevel.Warning, Client);
                         foreach (var f in batch)
                         {
@@ -863,19 +925,19 @@ namespace OpenMetaverse
                         ["owner_id"] = f.OwnerID,
                         ["fetch_folders"] = fetchFolders,
                         ["fetch_items"] = fetchItems,
-                        ["sort_order"] = (int) order
+                        ["sort_order"] = (int)order
                     };
 
                     requestedFolders.Add(requestedFolder);
                 }
-                OSDMap req = new OSDMap(1) {["folders"] = requestedFolders};
+                OSDMap req = new OSDMap(1) { ["folders"] = requestedFolders };
 
-                request.BeginGetResponse(req, OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+                request.PostRequestAsync(req, OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
             }
             catch (Exception ex)
             {
-                Logger.Log($"Failed to fetch inventory descendants: {ex.Message}\n" +
-                           $"{ex.StackTrace.ToString()}",
+                Logger.Log($"Failed to fetch inventory descendants: {ex.Message}" + Environment.NewLine +
+                           $"{ex.StackTrace}",
                            Helpers.LogLevel.Warning, Client);
                 foreach (var f in batch)
                 {
@@ -1093,7 +1155,7 @@ namespace OpenMetaverse
         public void UpdateFolderProperties(UUID folderID, UUID parentID, string name, FolderType type)
         {
             InventoryFolder inv = null;
-            lock (Store)
+            lock (_Store)
             {
                 if (_Store.Contains(folderID))
                 {
@@ -1109,15 +1171,15 @@ namespace OpenMetaverse
                 if (inv != null)
                 {
                     Client.AisClient.UpdateCategory(folderID, inv.GetOSD(), (success) =>
+                    {
+                        if (success)
                         {
-                            if (success)
+                            lock (_Store)
                             {
-                                lock (_Store)
-                                {
-                                    _Store.UpdateNodeFor(inv);
-                                }
+                                _Store.UpdateNodeFor(inv);
                             }
                         }
+                    }
                         ).ConfigureAwait(false);
                 }
             }
@@ -1142,7 +1204,7 @@ namespace OpenMetaverse
                     FolderID = folderID,
                     ParentID = parentID,
                     Name = Utils.StringToBytes(name),
-                    Type = (sbyte) type
+                    Type = (sbyte)type
                 };
 
                 Client.Network.SendPacket(invFolder);
@@ -1320,7 +1382,7 @@ namespace OpenMetaverse
                 },
                 InventoryData = new MoveInventoryItemPacket.InventoryDataBlock[itemsNewParents.Count]
             };
-            
+
             int index = 0;
             foreach (KeyValuePair<UUID, UUID> entry in itemsNewParents)
             {
@@ -1374,7 +1436,7 @@ namespace OpenMetaverse
                         AgentID = Client.Self.AgentID,
                         SessionID = Client.Self.SessionID
                     },
-                    InventoryData = {FolderID = folder}
+                    InventoryData = { FolderID = folder }
                 };
                 Client.Network.SendPacket(purge);
                 RemoveLocalUi(true, folder);
@@ -1387,7 +1449,7 @@ namespace OpenMetaverse
         /// <param name="item">The <seealso cref="UUID"/> of the inventory item to remove</param>
         public void RemoveItem(UUID item)
         {
-            List<UUID> items = new List<UUID>(1) {item};
+            List<UUID> items = new List<UUID>(1) { item };
             Remove(items, null);
         }
 
@@ -1397,7 +1459,7 @@ namespace OpenMetaverse
         /// <param name="folder">The <seealso cref="UUID"/> of the folder to remove</param>
         public void RemoveFolder(UUID folder)
         {
-            List<UUID> folders = new List<UUID>(1) {folder};
+            List<UUID> folders = new List<UUID>(1) { folder };
             Remove(null, folders);
         }
 
@@ -1424,7 +1486,7 @@ namespace OpenMetaverse
             {
                 // To indicate that we want no items removed:
                 rem.ItemData = new RemoveInventoryObjectsPacket.ItemDataBlock[1];
-                rem.ItemData[0] = new RemoveInventoryObjectsPacket.ItemDataBlock {ItemID = UUID.Zero};
+                rem.ItemData[0] = new RemoveInventoryObjectsPacket.ItemDataBlock { ItemID = UUID.Zero };
             }
             else
             {
@@ -1433,7 +1495,7 @@ namespace OpenMetaverse
                     rem.ItemData = new RemoveInventoryObjectsPacket.ItemDataBlock[items.Count];
                     for (int i = 0; i < items.Count; i++)
                     {
-                        rem.ItemData[i] = new RemoveInventoryObjectsPacket.ItemDataBlock {ItemID = items[i]};
+                        rem.ItemData[i] = new RemoveInventoryObjectsPacket.ItemDataBlock { ItemID = items[i] };
 
                         // Update local copy
                         if (_Store.Contains(items[i]))
@@ -1446,7 +1508,7 @@ namespace OpenMetaverse
             {
                 // To indicate we want no folders removed:
                 rem.FolderData = new RemoveInventoryObjectsPacket.FolderDataBlock[1];
-                rem.FolderData[0] = new RemoveInventoryObjectsPacket.FolderDataBlock {FolderID = UUID.Zero};
+                rem.FolderData[0] = new RemoveInventoryObjectsPacket.FolderDataBlock { FolderID = UUID.Zero };
             }
             else
             {
@@ -1455,7 +1517,7 @@ namespace OpenMetaverse
                     rem.FolderData = new RemoveInventoryObjectsPacket.FolderDataBlock[folders.Count];
                     for (int i = 0; i < folders.Count; i++)
                     {
-                        rem.FolderData[i] = new RemoveInventoryObjectsPacket.FolderDataBlock {FolderID = folders[i]};
+                        rem.FolderData[i] = new RemoveInventoryObjectsPacket.FolderDataBlock { FolderID = folders[i] };
 
                         // Update local copy
                         if (_Store.Contains(folders[i]))
@@ -1582,7 +1644,7 @@ namespace OpenMetaverse
                     Description = Utils.StringToBytes(description)
                 }
             };
-            
+
             Client.Network.SendPacket(create);
         }
 
@@ -1662,7 +1724,7 @@ namespace OpenMetaverse
                     Name = Utils.StringToBytes(name)
                 }
             };
-            
+
             Client.Network.SendPacket(create);
 
             return id;
@@ -1711,31 +1773,29 @@ namespace OpenMetaverse
 
             CapsClient request = Client.Network.CurrentSim.Caps.CreateCapsClient("NewFileAgentInventory");
 
-            if (request != null)
-            {
-                OSDMap query = new OSDMap
-                {
-                    {"folder_id", OSD.FromUUID(folderID)},
-                    {"asset_type", OSD.FromString(Utils.AssetTypeToString(assetType))},
-                    {"inventory_type", OSD.FromString(Utils.InventoryTypeToString(invType))},
-                    {"name", OSD.FromString(name)},
-                    {"description", OSD.FromString(description)},
-                    {"everyone_mask", OSD.FromInteger((int) permissions.EveryoneMask)},
-                    {"group_mask", OSD.FromInteger((int) permissions.GroupMask)},
-                    {"next_owner_mask", OSD.FromInteger((int) permissions.NextOwnerMask)},
-                    {"expected_upload_cost", OSD.FromInteger(Client.Settings.UPLOAD_COST)}
-                };
-
-                // Make the request
-                request.OnComplete += CreateItemFromAssetResponse;
-                request.UserData = new object[] { callback, data, Client.Settings.CAPS_TIMEOUT, query };
-
-                request.BeginGetResponse(query, OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
-            }
-            else
-            {
+            if (request == null) { 
                 throw new Exception("NewFileAgentInventory capability is not currently available");
             }
+
+            OSDMap query = new OSDMap
+            {
+                {"folder_id", OSD.FromUUID(folderID)},
+                {"asset_type", OSD.FromString(Utils.AssetTypeToString(assetType))},
+                {"inventory_type", OSD.FromString(Utils.InventoryTypeToString(invType))},
+                {"name", OSD.FromString(name)},
+                {"description", OSD.FromString(description)},
+                {"everyone_mask", OSD.FromInteger((int) permissions.EveryoneMask)},
+                {"group_mask", OSD.FromInteger((int) permissions.GroupMask)},
+                {"next_owner_mask", OSD.FromInteger((int) permissions.NextOwnerMask)},
+                {"expected_upload_cost", OSD.FromInteger(Client.Settings.UPLOAD_COST)}
+            };
+
+            // Make the request
+            request.OnComplete += CreateItemFromAssetResponse;
+            request.UserData = new object[] { callback, data, Client.Settings.CAPS_TIMEOUT, query };
+
+            request.PostRequestAsync(query, OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+
         }
 
         /// <summary>
@@ -1764,7 +1824,7 @@ namespace OpenMetaverse
         /// <param name="callback">Method to call upon creation of the link</param>
         public void CreateLink(UUID folderID, InventoryItem item, ItemCreatedCallback callback)
         {
-            CreateLink(folderID, item.UUID, item.Name, item.Description, AssetType.Link, 
+            CreateLink(folderID, item.UUID, item.Name, item.Description, AssetType.Link,
                 item.InventoryType, UUID.Random(), callback);
         }
 
@@ -1791,7 +1851,7 @@ namespace OpenMetaverse
         /// <param name="invType">Inventory Type</param>
         /// <param name="transactionID">Transaction UUID</param>
         /// <param name="callback">Method to call upon creation of the link</param>
-        public void CreateLink(UUID folderID, UUID itemID, string name, string description, 
+        public void CreateLink(UUID folderID, UUID itemID, string name, string description,
             AssetType assetType, InventoryType invType, UUID transactionID, ItemCreatedCallback callback)
         {
             if (Client.AisClient.IsAvailable)
@@ -1807,7 +1867,7 @@ namespace OpenMetaverse
                 };
                 links.Add(link);
 
-                OSDMap newInventory = new OSDMap {{"links", links}};
+                OSDMap newInventory = new OSDMap { { "links", links } };
                 Client.AisClient.CreateInventory(folderID, newInventory, true, callback)
                     .ConfigureAwait(false);
             }
@@ -1820,7 +1880,7 @@ namespace OpenMetaverse
                         AgentID = Client.Self.AgentID,
                         SessionID = Client.Self.SessionID
                     },
-                    InventoryBlock = {CallbackID = RegisterItemCreatedCallback(callback)}
+                    InventoryBlock = { CallbackID = RegisterItemCreatedCallback(callback) }
                 };
 
                 lock (_ItemInventoryTypeRequest)
@@ -1830,8 +1890,8 @@ namespace OpenMetaverse
                 create.InventoryBlock.FolderID = folderID;
                 create.InventoryBlock.TransactionID = transactionID;
                 create.InventoryBlock.OldItemID = itemID;
-                create.InventoryBlock.Type = (sbyte) assetType;
-                create.InventoryBlock.InvType = (sbyte) invType;
+                create.InventoryBlock.Type = (sbyte)assetType;
+                create.InventoryBlock.InvType = (sbyte)invType;
                 create.InventoryBlock.Name = Utils.StringToBytes(name);
                 create.InventoryBlock.Description = Utils.StringToBytes(description);
 
@@ -1866,9 +1926,9 @@ namespace OpenMetaverse
         public void RequestCopyItem(UUID item, UUID newParent, string newName, UUID oldOwnerID,
             ItemCopiedCallback callback)
         {
-            List<UUID> items = new List<UUID>(1) {item};
-            List<UUID> folders = new List<UUID>(1) {newParent};
-            List<string> names = new List<string>(1) {newName};
+            List<UUID> items = new List<UUID>(1) { item };
+            List<UUID> folders = new List<UUID>(1) { newParent };
+            List<string> names = new List<string>(1) { newName };
 
             RequestCopyItems(items, folders, names, oldOwnerID, callback);
         }
@@ -1942,7 +2002,7 @@ namespace OpenMetaverse
                     ObjectID = objectID
                 };
 
-                request.BeginGetResponse(message.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+                request.PostRequestAsync(message.Serialize(),OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
             }
             else
             {
@@ -1982,7 +2042,7 @@ namespace OpenMetaverse
         /// <param name="item"></param>
         public void RequestUpdateItem(InventoryItem item)
         {
-            List<InventoryItem> items = new List<InventoryItem>(1) {item};
+            List<InventoryItem> items = new List<InventoryItem>(1) { item };
 
             RequestUpdateItems(items, UUID.Random());
         }
@@ -2046,27 +2106,27 @@ namespace OpenMetaverse
 
                     var block = new UpdateInventoryItemPacket.InventoryDataBlock
                     {
-                        BaseMask = (uint) item.Permissions.BaseMask,
+                        BaseMask = (uint)item.Permissions.BaseMask,
                         CRC = ItemCRC(item),
-                        CreationDate = (int) Utils.DateTimeToUnixTime(item.CreationDate),
+                        CreationDate = (int)Utils.DateTimeToUnixTime(item.CreationDate),
                         CreatorID = item.CreatorID,
                         Description = Utils.StringToBytes(item.Description),
-                        EveryoneMask = (uint) item.Permissions.EveryoneMask,
-                        Flags = (uint) item.Flags,
+                        EveryoneMask = (uint)item.Permissions.EveryoneMask,
+                        Flags = (uint)item.Flags,
                         FolderID = item.ParentUUID,
                         GroupID = item.GroupID,
-                        GroupMask = (uint) item.Permissions.GroupMask,
+                        GroupMask = (uint)item.Permissions.GroupMask,
                         GroupOwned = item.GroupOwned,
-                        InvType = (sbyte) item.InventoryType,
+                        InvType = (sbyte)item.InventoryType,
                         ItemID = item.UUID,
                         Name = Utils.StringToBytes(item.Name),
-                        NextOwnerMask = (uint) item.Permissions.NextOwnerMask,
+                        NextOwnerMask = (uint)item.Permissions.NextOwnerMask,
                         OwnerID = item.OwnerID,
-                        OwnerMask = (uint) item.Permissions.OwnerMask,
+                        OwnerMask = (uint)item.Permissions.OwnerMask,
                         SalePrice = item.SalePrice,
-                        SaleType = (byte) item.SaleType,
+                        SaleType = (byte)item.SaleType,
                         TransactionID = item.TransactionID,
-                        Type = (sbyte) item.AssetType
+                        Type = (sbyte)item.AssetType
                     };
 
                     update.InventoryData[i] = block;
@@ -2091,12 +2151,12 @@ namespace OpenMetaverse
 
             if (request != null)
             {
-                OSDMap query = new OSDMap {{"item_id", OSD.FromUUID(notecardID)}};
+                OSDMap query = new OSDMap { { "item_id", OSD.FromUUID(notecardID) } };
 
                 // Make the request
                 request.OnComplete += UploadInventoryAssetResponse;
                 request.UserData = new object[] { new KeyValuePair<InventoryUploadedAssetCallback, byte[]>(callback, data), notecardID };
-                request.BeginGetResponse(query, OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+                request.PostRequestAsync(query, OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
             }
             else
             {
@@ -2129,7 +2189,7 @@ namespace OpenMetaverse
                 // Make the request
                 request.OnComplete += UploadInventoryAssetResponse;
                 request.UserData = new object[] { new KeyValuePair<InventoryUploadedAssetCallback, byte[]>(callback, data), notecardID };
-                request.BeginGetResponse(query, OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+                request.PostRequestAsync(query, OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
             }
             else
             {
@@ -2152,12 +2212,12 @@ namespace OpenMetaverse
 
             if (request != null)
             {
-                OSDMap query = new OSDMap {{"item_id", OSD.FromUUID(gestureID)}};
+                OSDMap query = new OSDMap { { "item_id", OSD.FromUUID(gestureID) } };
 
                 // Make the request
                 request.OnComplete += UploadInventoryAssetResponse;
                 request.UserData = new object[] { new KeyValuePair<InventoryUploadedAssetCallback, byte[]>(callback, data), gestureID };
-                request.BeginGetResponse(query, OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+                request.PostRequestAsync(query, OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
             }
             else
             {
@@ -2186,7 +2246,7 @@ namespace OpenMetaverse
 
                 request.OnComplete += new CapsClient.CompleteCallback(UpdateScriptAgentInventoryResponse);
                 request.UserData = new object[2] { new KeyValuePair<ScriptUpdatedCallback, byte[]>(callback, data), itemID };
-                request.BeginGetResponse(msg.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+                request.PostRequestAsync(msg.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
             }
             else
             {
@@ -2219,7 +2279,7 @@ namespace OpenMetaverse
 
                 request.OnComplete += new CapsClient.CompleteCallback(UpdateScriptAgentInventoryResponse);
                 request.UserData = new object[2] { new KeyValuePair<ScriptUpdatedCallback, byte[]>(callback, data), itemID };
-                request.BeginGetResponse(msg.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+                request.PostRequestAsync(msg.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
             }
             else
             {
@@ -2387,7 +2447,7 @@ namespace OpenMetaverse
                 AgentBlock = new DeRezObjectPacket.AgentBlockBlock
                 {
                     GroupID = UUID.Zero,
-                    Destination = (byte) destType,
+                    Destination = (byte)destType,
                     DestinationID = destFolder,
                     PacketCount = 1,
                     PacketNumber = 1,
@@ -2397,7 +2457,7 @@ namespace OpenMetaverse
             };
 
 
-            take.ObjectData[0] = new DeRezObjectPacket.ObjectDataBlock {ObjectLocalID = objectLocalID};
+            take.ObjectData[0] = new DeRezObjectPacket.ObjectDataBlock { ObjectLocalID = objectLocalID };
 
             Client.Network.SendPacket(take);
         }
@@ -2494,34 +2554,85 @@ namespace OpenMetaverse
         }
 
         /// <summary>
+        /// Recurse inventory category and return folders and items. Does NOT contain parent folder being searched
+        /// </summary>
+        /// <param name="folderID">Inventory category to recursively search</param>
+        /// <param name="owner">Owner of folder</param>
+        /// <param name="cats">reference to list of categories</param>
+        /// <param name="items">reference to list of items</param>
+        private void GetInventoryRecursive(UUID folderID, UUID owner,
+            ref List<InventoryFolder> cats, ref List<InventoryItem> items)
+        {
+
+            List<InventoryBase> contents = Client.Inventory.FolderContents(
+                folderID, owner, true, true, InventorySortOrder.ByDate, 1000 * 15);
+
+            foreach (var entry in contents)
+            {
+                switch (entry)
+                {
+                    case InventoryFolder folder:
+                        cats.Add(folder);
+                        GetInventoryRecursive(folder.UUID, owner, ref cats, ref items);
+                        break;
+                    case InventoryItem _:
+                        items.Add(Client.Inventory.FetchItem(entry.UUID, owner, 1000 * 10));
+                        break;
+                    default: // shouldn't happen
+                        Logger.Log("Retrieved inventory contents of invalid type", Helpers.LogLevel.Error);
+                        break;
+                }
+            }
+        }
+
+        /// <summary>
         /// Give an inventory Folder with contents to another avatar
         /// </summary>
         /// <param name="folderID">The <seealso cref="UUID"/> of the Folder to give</param>
         /// <param name="folderName">The name of the folder</param>
-        /// <param name="assetType">The type of the item from the <seealso cref="AssetType"/> enum</param>
         /// <param name="recipient">The <seealso cref="UUID"/> of the recipient</param>
         /// <param name="doEffect">true to generate a beameffect during transfer</param>
-        public void GiveFolder(UUID folderID, string folderName, AssetType assetType, UUID recipient,
-            bool doEffect)
+        public void GiveFolder(UUID folderID, string folderName, UUID recipient, bool doEffect)
         {
-            List<InventoryItem> folderContents = new List<InventoryItem>();
+            var folders = new List<InventoryFolder>();
+            var items = new List<InventoryItem>();
 
-            Client.Inventory.FolderContents(folderID, Client.Self.AgentID, false, true, InventorySortOrder.ByDate, 1000 * 15).ForEach(
-                delegate(InventoryBase ib)
-                {
-                    folderContents.Add(Client.Inventory.FetchItem(ib.UUID, Client.Self.AgentID, 1000 * 10));
-                });
-            var bucket = new byte[17 * (folderContents.Count + 1)];
+            GetInventoryRecursive(folderID, Client.Self.AgentID, ref folders, ref items);
 
-            //Add parent folder (first item in bucket)
-            bucket[0] = (byte)assetType;
-            Buffer.BlockCopy(folderID.GetBytes(), 0, bucket, 1, 16);
+            int total_contents = folders.Count + items.Count;
 
-            //Add contents to bucket after folder
-            for (int i = 1; i <= folderContents.Count; ++i)
+            // check for too many items.
+            if (total_contents > MAX_GIVE_ITEMS)
             {
-                bucket[i * 17] = (byte)folderContents[i - 1].AssetType;
-                Buffer.BlockCopy(folderContents[i - 1].UUID.GetBytes(), 0, bucket, i * 17 + 1, 16);
+                Logger.Log("Cannot give more than 42 items in a single inventory transfer.", Helpers.LogLevel.Info);
+                return;
+            }
+            if (!items.Any())
+            {
+                Logger.Log("No items to transfer.", Helpers.LogLevel.Info);
+                return;
+            }
+
+            var bucket = new byte[17 * (total_contents + 1)];
+            int offset = 0; // account for first byte
+
+            //Add folders (parent folder first)
+            bucket[offset++] = (byte)AssetType.Folder;
+            Buffer.BlockCopy(folderID.GetBytes(), 0, bucket, offset, 16);
+            offset += 16;
+            foreach (var folder in folders)
+            {
+                bucket[offset++] = (byte)AssetType.Folder;
+                Buffer.BlockCopy(folder.UUID.GetBytes(), 0, bucket, offset, 16);
+                offset += 16;
+            }
+
+            //Add items to bucket after folders
+            foreach (var item in items)
+            {
+                bucket[offset++] = (byte)item.AssetType;
+                Buffer.BlockCopy(item.UUID.GetBytes(), 0, bucket, offset, 16);
+                offset += 16;
             }
 
             Client.Self.InstantMessage(
@@ -2542,7 +2653,7 @@ namespace OpenMetaverse
             }
 
             // Remove from store if items were no copy
-            foreach (InventoryItem item in folderContents)
+            foreach (InventoryItem item in items)
             {
                 if (Store.Items.ContainsKey(item.UUID) && Store[item.UUID] is InventoryItem)
                 {
@@ -2572,7 +2683,7 @@ namespace OpenMetaverse
         {
             UUID transactionID = UUID.Random();
 
-           var update = new UpdateTaskInventoryPacket
+            var update = new UpdateTaskInventoryPacket
             {
                 AgentData =
                 {
@@ -2632,7 +2743,7 @@ namespace OpenMetaverse
             AutoResetEvent taskReplyEvent = new AutoResetEvent(false);
 
             EventHandler<TaskInventoryReplyEventArgs> callback =
-                delegate(object sender, TaskInventoryReplyEventArgs e)
+                delegate (object sender, TaskInventoryReplyEventArgs e)
                 {
                     if (e.ItemID == objectID)
                     {
@@ -2656,7 +2767,7 @@ namespace OpenMetaverse
                     AutoResetEvent taskDownloadEvent = new AutoResetEvent(false);
 
                     EventHandler<XferReceivedEventArgs> xferCallback =
-                        delegate(object sender, XferReceivedEventArgs e)
+                        delegate (object sender, XferReceivedEventArgs e)
                         {
                             if (e.Xfer.XferID == xferID)
                             {
@@ -2724,7 +2835,7 @@ namespace OpenMetaverse
                     AgentID = Client.Self.AgentID,
                     SessionID = Client.Self.SessionID
                 },
-                InventoryData = {LocalID = objectLocalID}
+                InventoryData = { LocalID = objectLocalID }
             };
 
             Client.Network.SendPacket(request, simulator);
@@ -3491,7 +3602,7 @@ namespace OpenMetaverse
                         imp.MessageBlock.BinaryBucket = Utils.EmptyBytes;
                     }
 
-                    Client.Network.SendPacket(imp, e.Simulator);
+                    Client.Network.SendPacket(imp, e.Simulator ?? Client.Network.CurrentSim);
                 }
                 catch (Exception ex)
                 {
@@ -3542,7 +3653,7 @@ namespace OpenMetaverse
                 CapsClient upload = new CapsClient(new Uri(uploadURL), "CreateItemFromAsset");
                 upload.OnComplete += CreateItemFromAssetResponse;
                 upload.UserData = new object[] { callback, itemData, millisecondsTimeout, request };
-                upload.BeginGetResponse(itemData, "application/octet-stream", millisecondsTimeout);
+                upload.PostRequestAsync(itemData, "application/octet-stream", millisecondsTimeout);
             }
             else if (status == "complete")
             {
@@ -3621,7 +3732,7 @@ namespace OpenMetaverse
                         CapsClient upload = new CapsClient(uploadURL, "UploadItemResponse");
                         upload.OnComplete += UploadInventoryAssetResponse;
                         upload.UserData = new object[2] { kvp, (UUID)(((object[])client.UserData)[1]) };
-                        upload.BeginGetResponse(itemData, "application/octet-stream", Client.Settings.CAPS_TIMEOUT);
+                        upload.PostRequestAsync(itemData, "application/octet-stream", Client.Settings.CAPS_TIMEOUT);
                     }
                     else
                     {
@@ -3692,7 +3803,7 @@ namespace OpenMetaverse
                 CapsClient upload = new CapsClient(new Uri(uploadURL), "ScriptAgentInventoryResponse");
                 upload.OnComplete += UpdateScriptAgentInventoryResponse;
                 upload.UserData = new object[2] { kvp, (UUID)(((object[])client.UserData)[1]) };
-                upload.BeginGetResponse(itemData, "application/octet-stream", Client.Settings.CAPS_TIMEOUT);
+                upload.PostRequestAsync(itemData, "application/octet-stream", Client.Settings.CAPS_TIMEOUT);
             }
             else if (status == "complete" && callback != null)
             {
@@ -3777,7 +3888,7 @@ namespace OpenMetaverse
                             {
                                 ParentUUID = data.ParentID,
                                 Name = Utils.BytesToString(data.Name),
-                                PreferredType = (FolderType) data.Type,
+                                PreferredType = (FolderType)data.Type,
                                 OwnerID = reply.AgentData.OwnerID
                             };
 
@@ -3846,7 +3957,7 @@ namespace OpenMetaverse
             if (_Store.Contains(reply.AgentData.FolderID) &&
                 _Store[reply.AgentData.FolderID] is InventoryFolder)
             {
-                parentFolder = (InventoryFolder) _Store[reply.AgentData.FolderID];
+                parentFolder = (InventoryFolder)_Store[reply.AgentData.FolderID];
             }
             else
             {
@@ -3875,7 +3986,7 @@ namespace OpenMetaverse
             {
                 if (_Searches.Count > 0)
                 {
-                    StartSearch:
+                StartSearch:
                     // Iterate over all of the outstanding searches
                     for (int i = 0; i < _Searches.Count; i++)
                     {
@@ -3943,7 +4054,7 @@ namespace OpenMetaverse
 
             foreach (UpdateCreateInventoryItemPacket.InventoryDataBlock dataBlock in reply.InventoryData)
             {
-                if (dataBlock.InvType == (sbyte) InventoryType.Folder)
+                if (dataBlock.InvType == (sbyte)InventoryType.Folder)
                 {
                     Logger.Log(
                         "Received InventoryFolder in an UpdateCreateInventoryItem packet, this should not happen!",
@@ -3951,8 +4062,8 @@ namespace OpenMetaverse
                     continue;
                 }
 
-                InventoryItem item = CreateInventoryItem((InventoryType) dataBlock.InvType, dataBlock.ItemID);
-                item.AssetType = (AssetType) dataBlock.Type;
+                InventoryItem item = CreateInventoryItem((InventoryType)dataBlock.InvType, dataBlock.ItemID);
+                item.AssetType = (AssetType)dataBlock.Type;
                 item.AssetUUID = dataBlock.AssetID;
                 item.CreationDate = Utils.UnixTimeToDateTime(dataBlock.CreationDate);
                 item.CreatorID = dataBlock.CreatorID;
@@ -3970,7 +4081,7 @@ namespace OpenMetaverse
                     dataBlock.NextOwnerMask,
                     dataBlock.OwnerMask);
                 item.SalePrice = dataBlock.SalePrice;
-                item.SaleType = (SaleType) dataBlock.SaleType;
+                item.SaleType = (SaleType)dataBlock.SaleType;
 
                 /* 
                      * When attaching new objects, an UpdateCreateInventoryItem packet will be
@@ -4052,7 +4163,7 @@ namespace OpenMetaverse
 
                 Logger.Log(
                     $"MoveInventoryItemHandler: Item {data.ItemID.ToString()} is moving to Folder {data.FolderID.ToString()} with new name \"{newName}\"." +
-                    $" Someone write this function!", 
+                    " Someone write this function!",
                     Helpers.LogLevel.Warning, Client);
             }
         }
@@ -4162,7 +4273,7 @@ namespace OpenMetaverse
                     }
                     else
                     {
-                        folder = (InventoryFolder) _Store[dataBlock.FolderID];
+                        folder = (InventoryFolder)_Store[dataBlock.FolderID];
                     }
 
                     if (dataBlock.Name != null)
@@ -4180,9 +4291,9 @@ namespace OpenMetaverse
                 foreach (BulkUpdateInventoryPacket.ItemDataBlock dataBlock in update.ItemData)
                 {
                     InventoryItem item =
-                        SafeCreateInventoryItem((InventoryType) dataBlock.InvType, dataBlock.ItemID);
+                        SafeCreateInventoryItem((InventoryType)dataBlock.InvType, dataBlock.ItemID);
 
-                    item.AssetType = (AssetType) dataBlock.Type;
+                    item.AssetType = (AssetType)dataBlock.Type;
                     if (dataBlock.AssetID != UUID.Zero) item.AssetUUID = dataBlock.AssetID;
                     item.CreationDate = Utils.UnixTimeToDateTime(dataBlock.CreationDate);
                     item.CreatorID = dataBlock.CreatorID;
@@ -4200,7 +4311,7 @@ namespace OpenMetaverse
                         dataBlock.NextOwnerMask,
                         dataBlock.OwnerMask);
                     item.SalePrice = dataBlock.SalePrice;
-                    item.SaleType = (SaleType) dataBlock.SaleType;
+                    item.SaleType = (SaleType)dataBlock.SaleType;
 
                     _Store[item.UUID] = item;
 
@@ -4249,15 +4360,15 @@ namespace OpenMetaverse
 
             foreach (FetchInventoryReplyPacket.InventoryDataBlock dataBlock in reply.InventoryData)
             {
-                if (dataBlock.InvType == (sbyte) InventoryType.Folder)
+                if (dataBlock.InvType == (sbyte)InventoryType.Folder)
                 {
                     Logger.Log("Received FetchInventoryReply for an inventory folder, this should not happen!",
                         Helpers.LogLevel.Error, Client);
                     continue;
                 }
 
-                InventoryItem item = CreateInventoryItem((InventoryType) dataBlock.InvType, dataBlock.ItemID);
-                item.AssetType = (AssetType) dataBlock.Type;
+                InventoryItem item = CreateInventoryItem((InventoryType)dataBlock.InvType, dataBlock.ItemID);
+                item.AssetType = (AssetType)dataBlock.Type;
                 item.AssetUUID = dataBlock.AssetID;
                 item.CreationDate = Utils.UnixTimeToDateTime(dataBlock.CreationDate);
                 item.CreatorID = dataBlock.CreatorID;
@@ -4265,7 +4376,7 @@ namespace OpenMetaverse
                 item.Flags = dataBlock.Flags;
                 item.GroupID = dataBlock.GroupID;
                 item.GroupOwned = dataBlock.GroupOwned;
-                item.InventoryType = (InventoryType) dataBlock.InvType;
+                item.InventoryType = (InventoryType)dataBlock.InvType;
                 item.Name = Utils.BytesToString(dataBlock.Name);
                 item.OwnerID = dataBlock.OwnerID;
                 item.ParentUUID = dataBlock.FolderID;
@@ -4276,7 +4387,7 @@ namespace OpenMetaverse
                     dataBlock.NextOwnerMask,
                     dataBlock.OwnerMask);
                 item.SalePrice = dataBlock.SalePrice;
-                item.SaleType = (SaleType) dataBlock.SaleType;
+                item.SaleType = (SaleType)dataBlock.SaleType;
                 item.UUID = dataBlock.ItemID;
 
                 _Store[item.UUID] = item;

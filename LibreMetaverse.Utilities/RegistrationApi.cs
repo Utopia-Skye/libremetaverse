@@ -33,6 +33,7 @@ using OpenMetaverse.Http;
 
 namespace OpenMetaverse
 {
+    [Obsolete("Linden Lab has discontinued RegAPI access", true)]
     public class RegistrationApi
     {
         const int REQUEST_TIMEOUT = 1000 * 100;
@@ -137,7 +138,7 @@ namespace OpenMetaverse
 
             var request = new CapsClient(RegistrationApiCaps);
             request.OnComplete += GatherCapsResponse;
-            request.BeginGetResponse(postData, "application/x-www-form-urlencoded", REQUEST_TIMEOUT);
+            request.PostRequestAsync(postData, "application/x-www-form-urlencoded", REQUEST_TIMEOUT);
         }
 
         private void GatherCapsResponse(CapsClient client, OSD response, Exception error)
@@ -167,7 +168,7 @@ namespace OpenMetaverse
 
             var request = new CapsClient(_caps.GetErrorCodes);
             request.OnComplete += GatherErrorMessagesResponse;
-            request.BeginGetResponse(REQUEST_TIMEOUT);
+            request.GetRequestAsync(REQUEST_TIMEOUT);
         }
 
         private void GatherErrorMessagesResponse(CapsClient client, OSD response, Exception error)
@@ -205,7 +206,7 @@ namespace OpenMetaverse
 
             var request = new CapsClient(_caps.GetLastNames);
             request.OnComplete += GatherLastNamesResponse;
-            request.BeginGetResponse(REQUEST_TIMEOUT);
+            request.GetRequestAsync(REQUEST_TIMEOUT);
 
             // FIXME: Block
         }
@@ -251,7 +252,7 @@ namespace OpenMetaverse
 
             var request = new CapsClient(_caps.CheckName);
             request.OnComplete += CheckNameResponse;
-            request.BeginGetResponse(REQUEST_TIMEOUT);
+            request.GetRequestAsync(REQUEST_TIMEOUT);
 
             // FIXME:
             return false;
@@ -319,7 +320,7 @@ namespace OpenMetaverse
             // Make the request
             var request = new CapsClient(_caps.CreateUser);
             request.OnComplete += CreateUserResponse;
-            request.BeginGetResponse(REQUEST_TIMEOUT);
+            request.GetRequestAsync(REQUEST_TIMEOUT);
 
             // FIXME: Block
             return UUID.Zero;

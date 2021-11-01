@@ -75,10 +75,7 @@ namespace OpenMetaverse.Assets
         public AssetPrim(PrimObject parent, List<PrimObject> children)
         {
             Parent = parent;
-            if (children != null)
-                Children = children;
-            else
-                Children = new List<PrimObject>(0);
+            Children = children ?? new List<PrimObject>(0);
         }
 
         /// <summary>
@@ -785,8 +782,9 @@ namespace OpenMetaverse.Assets
                 if (Items != null)
                 {
                     OSDArray array = new OSDArray(Items.Length);
-                    for (int i = 0; i < Items.Length; i++)
-                        array.Add(Items[i].Serialize());
+                    foreach (var i in Items)
+                        array.Add(i.Serialize());
+
                     map["items"] = array;
                 }
 

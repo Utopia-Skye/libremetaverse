@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2006-2016, openmetaverse.co
+ * Copyright (c) 2021, Sjofn LLC.
  * All rights reserved.
  *
  * - Redistribution and use in source and binary forms, with or without
@@ -34,7 +35,7 @@ using System.Text;
 
 namespace OpenMetaverse.StructuredData
 {
-    public enum OSDType
+    public enum OSDType : byte
     {
         Unknown,
         Boolean,
@@ -46,7 +47,8 @@ namespace OpenMetaverse.StructuredData
         URI,
         Binary,
         Map,
-        Array
+        Array,
+        LlsdXml
     }
 
     public enum OSDFormat
@@ -64,7 +66,7 @@ namespace OpenMetaverse.StructuredData
     public class OSDException : Exception
     {
         public OSDException(string message) : base(message) { }
-        public OSDException() : base() { }
+        public OSDException() { }
         public OSDException(string message, Exception innerException) : base(message, innerException) { }
         protected OSDException(System.Runtime.Serialization.SerializationInfo info, System.Runtime.Serialization.StreamingContext context) : base(info, context) { }     
     }
@@ -550,6 +552,27 @@ namespace OpenMetaverse.StructuredData
         // "r" ensures the dt will correctly round-trip back through Double.TryParse
         public override string AsString() { return _mReal.ToString("r", Utils.EnUsCulture); }
         public override byte[] AsBinary() { return Utils.DoubleToBytesBig(_mReal); }
+        public override string ToString() { return AsString(); }
+    }
+
+    /// <summary>
+    /// OSD LLSD-XML Element
+    /// </summary>
+    public sealed class OSDLlsdXml : OSD
+    {
+        public readonly string value;
+        public override OSDType Type => OSDType.LlsdXml;
+
+        public override OSD Copy() { return new OSDLlsdXml(value); }
+
+        public OSDLlsdXml(string value)
+        {
+            // Refuse to hold null pointers
+            this.value = value ?? string.Empty;
+        }
+
+        public override string AsString() { return value; }
+        public override byte[] AsBinary() { return Encoding.UTF8.GetBytes(value); }
         public override string ToString() { return AsString(); }
     }
 
@@ -1224,7 +1247,7 @@ namespace OpenMetaverse.StructuredData
 
         public static OSD Deserialize(Stream stream)
         {
-            if (!stream.CanSeek) throw new OSDException("Cannot deserialize structured data from unseekable streams");
+            if (!stream.CanSeek) { throw new OSDException("Cannot deserialize structured data from unseekable streams"); }
 
             byte[] headerData = new byte[14];
             stream.Read(headerData, 0, 14);

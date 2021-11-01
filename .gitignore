@@ -3,9 +3,14 @@ compile.bat
 *.userprefs
 *.suo
 *.cache
+*.pfx
+
+LibreMetaverse/LibreMetaverse.XML
+LibreMetaverse.*.XML
 
 [Oo]bj/
 [Bb]in/
 packages/
 .idea/
 .vs/
+/Programs/examples/TestClient/Properties/launchSettings.json

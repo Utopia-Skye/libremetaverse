@@ -110,13 +110,13 @@ namespace OpenMetaverse.Assets
         {
             // Right now we're nastily obtaining the UUID from the filename
             string filename = assetPath.Remove(0, ArchiveConstants.ASSETS_PATH.Length);
-            int i = filename.LastIndexOf(ArchiveConstants.ASSET_EXTENSION_SEPARATOR);
+            int i = filename.LastIndexOf(ArchiveConstants.ASSET_EXTENSION_SEPARATOR, StringComparison.Ordinal);
 
             if (i == -1)
             {
-                Logger.Log(String.Format(
-                    "[OarFile]: Could not find extension information in asset path {0} since it's missing the separator {1}.  Skipping",
-                    assetPath, ArchiveConstants.ASSET_EXTENSION_SEPARATOR), Helpers.LogLevel.Warning);
+                Logger.Log(
+                    $"[OarFile]: Could not find extension information in asset path {assetPath} since it's missing the separator " +
+                    $"{ArchiveConstants.ASSET_EXTENSION_SEPARATOR}.  Skipping", Helpers.LogLevel.Warning);
                 return false;
             }
 
@@ -435,7 +435,10 @@ namespace OpenMetaverse.Assets
             xtw.WriteElementString("SnapshotID", parcel.SnapshotID.ToString());
             xtw.WriteElementString("UserLocation", parcel.UserLocation.ToString());
             xtw.WriteElementString("UserLookAt", parcel.UserLookAt.ToString());
-            xtw.WriteElementString("Dwell", "0");
+            xtw.WriteElementString("Dwell", parcel.Dwell.ToString());
+            xtw.WriteElementString("SeeAVs", parcel.SeeAVs.ToString());
+            xtw.WriteElementString("AnyAVSounds", parcel.AnyAVSounds.ToString());
+            xtw.WriteElementString("GroupAVSounds", parcel.GroupAVSounds.ToString());
             xtw.WriteElementString("OtherCleanTime", Convert.ToString(parcel.OtherCleanTime));
 
             xtw.WriteEndElement();
@@ -534,9 +537,8 @@ namespace OpenMetaverse.Assets
 
                 if (prim.Textures.FaceTextures != null)
                 {
-                    for (int i = 0; i < prim.Textures.FaceTextures.Length; i++)
+                    foreach (var face in prim.Textures.FaceTextures)
                     {
-                        Primitive.TextureEntryFace face = prim.Textures.FaceTextures[i];
                         if (face != null)
                             textureList[face.TextureID] = face.TextureID;
                     }

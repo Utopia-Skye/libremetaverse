@@ -38,14 +38,15 @@ using System.Text;
 using System.Threading;
 using System.Net.Sockets;
 using System.Collections.Generic;
+using System.Net.Http;
 using System.Text.RegularExpressions;
 using OpenMetaverse;
 using OpenMetaverse.Http;
 using OpenMetaverse.Packets;
 using OpenMetaverse.StructuredData;
 using log4net;
-using Nwc.XmlRpc;
-using Logger = Nwc.XmlRpc.Logger;
+using XmlRpcCore;
+using Logger = XmlRpcCore.Logger;
 
 namespace GridProxy
 {
@@ -186,6 +187,8 @@ namespace GridProxy
     {
         public ProxyConfig proxyConfig;
         private string loginURI;
+
+        private static readonly HttpClient HttpClient = new HttpClient();
         
         static List<string> BinaryResponseCaps = new List<string>()
         {
@@ -223,17 +226,15 @@ namespace GridProxy
 
                 RunSimProxy();
 
-                Thread runLoginProxy = new Thread(new ThreadStart(RunLoginProxy));
-                runLoginProxy.IsBackground = true;
-                runLoginProxy.Name = "Login Proxy";
+                Thread runLoginProxy = new Thread(new ThreadStart(RunLoginProxy))
+                {
+                    IsBackground = true, Name = "Login Proxy"
+                };
                 runLoginProxy.Start();
 
                 IPEndPoint endPoint = (IPEndPoint)loginServer.LocalEndPoint;
-                IPAddress displayAddress;
-                if (endPoint.Address == IPAddress.Any)
-                    displayAddress = IPAddress.Loopback;
-                else
-                    displayAddress = endPoint.Address;
+                var displayAddress = Equals(endPoint.Address, IPAddress.Any) 
+                    ? IPAddress.Loopback : endPoint.Address;
                 loginURI = "http://" + displayAddress + ":" + endPoint.Port + "/";
 
                 OpenMetaverse.Logger.Log("Proxy ready at " + loginURI, Helpers.LogLevel.Info);
@@ -988,10 +989,8 @@ namespace GridProxy
 
                 if (stage == CapsStage.Response)
                 {
-                    if (capReq.Response != null && capReq.Response is OSDMap)
+                    if (capReq.Response != null && capReq.Response is OSDMap map)
                     {
-                        OSDMap map = (OSDMap)capReq.Response;
-
                         if (map.ContainsKey("uploader"))
                         {
                             string val = map["uploader"].AsString();
@@ -1024,8 +1023,8 @@ namespace GridProxy
             if (stage != CapsStage.Response) return false;
 
             OSDMap map = null;
-            if (capReq.Response is OSDMap)
-                map = (OSDMap)capReq.Response;
+            if (capReq.Response is OSDMap response)
+                map = response;
             else return false;
 
             OSDArray array = null;
@@ -1053,7 +1052,7 @@ namespace GridProxy
                     ushort simPort = (ushort)info["SimPort"].AsInteger();
                     string capsURL = info["SeedCapability"].AsString();
 
-                    GenericCheck(ref simIP, ref simPort, ref capsURL, capReq.Info.Sim == activeCircuit);
+                    GenericCheck(ref simIP, ref simPort, ref capsURL, Equals(capReq.Info.Sim, activeCircuit));
 
                     info["SeedCapability"] = OSD.FromString(capsURL);
                     bytes[0] = (byte)(simIP % 256);
@@ -1072,7 +1071,7 @@ namespace GridProxy
                     ushort Port = (ushort)info["Port"].AsInteger();
                     string capsURL = null;
 
-                    GenericCheck(ref IP, ref Port, ref capsURL, capReq.Info.Sim == activeCircuit);
+                    GenericCheck(ref IP, ref Port, ref capsURL, Equals(capReq.Info.Sim, activeCircuit));
 
                     bytes[0] = (byte)(IP % 256);
                     bytes[1] = (byte)((IP >> 8) % 256);
@@ -1095,7 +1094,7 @@ namespace GridProxy
 
                     GenericCheck(ref simIP, ref simPort, ref capsURL, false);
                     body["seed-capability"] = OSD.FromString(capsURL);
-                    string ipport = String.Format("{0}:{1}", new IPAddress(simIP), simPort);
+                    string ipport = $"{new IPAddress(simIP)}:{simPort}";
                     body["sim-ip-and-port"] = OSD.FromString(ipport);
 
                     OpenMetaverse.Logger.Log("DEBUG: Modified EstablishAgentCommunication to " + body["sim-ip-and-port"].AsString() + " with seed cap " + capsURL, Helpers.LogLevel.Debug);
@@ -1129,8 +1128,10 @@ namespace GridProxy
                 try
                 {
                     // forward the XML-RPC request to the server
-                    response = (XmlRpcResponse)request.Send(proxyConfig.remoteLoginUri.ToString(),
-                        30 * 1000); // 30 second timeout
+                    var cts = new CancellationTokenSource();
+                    cts.CancelAfter(TimeSpan.FromSeconds(30)); // 30 second timeout
+                    response = HttpClient.PostAsXmlRpcAsync(proxyConfig.remoteLoginUri, request, cts.Token).Result;
+                    cts.Dispose();
                 }
                 catch (Exception e)
                 {
@@ -1216,7 +1217,7 @@ namespace GridProxy
                         remoteComplete.Set();
                     }
                     );
-                loginRequest.BeginGetResponse(content, "application/llsd+xml", 1000 * 100);
+                loginRequest.PostRequestAsync(content, "application/llsd+xml", 1000 * 100);
                 remoteComplete.WaitOne(1000 * 100, false);
 
                 if (response == null)

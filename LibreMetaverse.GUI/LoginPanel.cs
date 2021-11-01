@@ -193,10 +193,11 @@ namespace OpenMetaverse.GUI
 
             if (LoginThread != null)
             {
-                LoginThread.Abort();
+                if (LoginThread.IsAlive)
+                    _Client.Network.AbortLogin();
                 LoginThread = null;
             }
-            LoginThread = new Thread(new ThreadStart(delegate() { _Client.Network.Login(_LoginParams); }));
+            LoginThread = new Thread(delegate() { _Client.Network.Login(_LoginParams); });
             LoginThread.Start();
         }
 
@@ -207,9 +208,9 @@ namespace OpenMetaverse.GUI
                 this.BeginInvoke(new MethodInvoker(delegate() { SetText(control, text); }));
             else
             {
-                if (control is Button) ((Button)control).Text = text;
-                else if (control is ComboBox) ((ComboBox)control).Text = text;
-                else if (control is TextBox) ((TextBox)control).Text = text;
+                if (control is Button button) button.Text = text;
+                else if (control is ComboBox box) box.Text = text;
+                else if (control is TextBox textBox) textBox.Text = text;
             }
         }
 
@@ -243,7 +244,7 @@ namespace OpenMetaverse.GUI
                 if (LoginThread != null)
                 {
                     if (LoginThread.IsAlive)
-                        LoginThread.Abort();
+                        _Client.Network.AbortLogin();
 
                     LoginThread = null;
                 }

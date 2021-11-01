@@ -25,7 +25,9 @@
 
 using System;
 using System.Collections.Generic;
+using OpenMetaverse.Http;
 using OpenMetaverse.Packets;
+using OpenMetaverse.StructuredData;
 
 namespace OpenMetaverse
 {
@@ -233,6 +235,24 @@ namespace OpenMetaverse
     public class FriendsManager
     {
         #region Delegates
+
+        private EventHandler<FriendsReadyEventArgs> m_FriendsListReadyResponse;
+
+        protected virtual void OnfriendsListReady(FriendsReadyEventArgs e)
+        {
+            EventHandler<FriendsReadyEventArgs> handler = m_FriendsListReadyResponse;
+            if (handler != null)
+                handler(this, e);
+        }
+
+        /// <summary>Thread sync lock object</summary>
+        private readonly object m_FriendsListReadyLock = new object();
+
+        public event EventHandler<FriendsReadyEventArgs> friendsListReady
+        {
+            add { lock (m_FriendsListReadyLock) { m_FriendsListReadyResponse += value; } }
+            remove { lock (m_FriendsListReadyLock) { m_FriendsListReadyResponse -= value; } }
+        }
 
         /// <summary>The event subscribers. null if no subcribers</summary>
         private EventHandler<FriendInfoEventArgs> m_FriendOnline;
@@ -471,7 +491,7 @@ namespace OpenMetaverse
         /// <summary>
         /// Accept a friendship request
         /// </summary>
-        /// <param name="fromAgentID">agentID of avatatar to form friendship with</param>
+        /// <param name="fromAgentID">agentID of avatar to form friendship with</param>
         /// <param name="imSessionID">imSessionID of the friendship request message</param>
         public void AcceptFriendship(UUID fromAgentID, UUID imSessionID)
         {
@@ -500,6 +520,63 @@ namespace OpenMetaverse
         }
 
         /// <summary>
+        /// Accept friendship request. Only to be used if request was sent via Offline Msg cap
+        /// This can be determined by the presence of a <seealso cref="InstantMessageEventArgs.Simulator"/>
+        /// value in <seealso cref="InstantMessageEventArgs" />
+        /// </summary>
+        /// <param name="fromAgentID">agentID of avatar to form friendship with</param>
+        public void AcceptFriendshipCapability(UUID fromAgentID)
+        {
+            Uri acceptFriendshipCap = Client.Network.CurrentSim.Caps.CapabilityURI("AcceptFriendship");
+            if (acceptFriendshipCap == null)
+            {
+                Logger.Log("AcceptFriendship capability not found.", Helpers.LogLevel.Warning);
+                return;
+            }
+            UriBuilder builder = new UriBuilder(acceptFriendshipCap)
+            {
+                // Second Life has some infintely stupid escaped agent name as part of the uri query.
+                // Hopefully we don't need it because it makes no goddamn sense at all. Period, but just in case:
+                // ?from={fromAgentID}&agent_name=\"This%20Sucks\"
+                Query = $"from={fromAgentID}"
+            };
+            acceptFriendshipCap = builder.Uri;
+
+            var request = new CapsClient(acceptFriendshipCap);
+            var body = new OSD();
+            request.OnComplete += delegate(CapsClient client, OSD result, Exception error)
+            {
+                if (error != null)
+                {
+                    Logger.Log($"AcceptFriendship failed for {fromAgentID}. ({error.Message})",
+                        Helpers.LogLevel.Warning);
+                    return;
+                }
+
+                if (result != null)
+                {
+                    var resMap = result as OSDMap;
+                    if (!(resMap.ContainsKey("success") && resMap["success"].AsBoolean())) { return; }
+
+                    FriendInfo friend = new FriendInfo(fromAgentID, FriendRights.CanSeeOnline, FriendRights.CanSeeOnline);
+
+                    if (!FriendList.ContainsKey(fromAgentID))
+                    {
+                        FriendList.Add(friend.UUID, friend);
+                    }
+                    if (FriendRequests.ContainsKey(fromAgentID))
+                    {
+                        FriendRequests.Remove(fromAgentID);
+                    }
+                    Client.Avatars.RequestAvatarName(fromAgentID);
+                }
+
+                
+            };
+            request.PostRequestAsync(body, OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+        }
+
+        /// <summary>
         /// Decline a friendship request
         /// </summary>
         /// <param name="fromAgentID"><seealso cref="UUID"/> of friend</param>
@@ -514,6 +591,53 @@ namespace OpenMetaverse
 
             if (FriendRequests.ContainsKey(fromAgentID))
                 FriendRequests.Remove(fromAgentID);
+        }
+
+        /// <summary>
+        /// Decline friendship request. Only to be used if request was sent via Offline Msg cap
+        /// This can be determined by the presence of a <seealso cref="InstantMessageEventArgs.Simulator"/>
+        /// value in <seealso cref="InstantMessageEventArgs" />
+        /// </summary>
+        /// <param name="fronAgentID"><seealso cref="UUID"/> of friend</param>
+        public void DeclineFriendshipCap(UUID fromAgentID)
+        {
+            Uri declineFriendshipCap = Client.Network.CurrentSim.Caps.CapabilityURI("DeclineFriendship");
+            if (declineFriendshipCap == null)
+            {
+                Logger.Log("DeclineFriendship capability not found.", Helpers.LogLevel.Warning);
+                return;
+            }
+            UriBuilder builder = new UriBuilder(declineFriendshipCap)
+            {
+                Query = $"from={fromAgentID}"
+            };
+            declineFriendshipCap = builder.Uri;
+
+            var request = new CapsClient(declineFriendshipCap);
+            var body = new OSD();
+            request.OnComplete += delegate (CapsClient client, OSD result, Exception error)
+            {
+                if (error != null)
+                {
+                    Logger.Log($"AcceptFriendship failed for {fromAgentID}. ({error.Message})",
+                        Helpers.LogLevel.Warning);
+                    return;
+                }
+
+                if (result != null)
+                {
+                    var resMap = result as OSDMap;
+                    if (!(resMap.ContainsKey("success") && resMap["success"].AsBoolean())) { return; }
+
+                    if (FriendRequests.ContainsKey(fromAgentID))
+                    {
+                        FriendRequests.Remove(fromAgentID);
+                    }
+                }
+
+
+            };
+            request.DeleteRequestAsync(body, OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
         }
 
         /// <summary>
@@ -918,10 +1042,30 @@ namespace OpenMetaverse
                         }
                     }
                 }
+                OnfriendsListReady(new FriendsReadyEventArgs(FriendList.Count));
             }
         }
     }
     #region EventArgs
+
+   
+    public class FriendsReadyEventArgs : EventArgs
+    {
+        private readonly int m_count;
+
+        /// <summary>Number of friends we have</summary>
+        public int Count { get { return m_count; } }
+        /// <summary>Get the name of the agent we requested a friendship with</summary>
+
+        /// <summary>
+        /// Construct a new instance of the FriendsReadyEventArgs class
+        /// </summary>
+        /// <param name="count">The total number of people loaded into the friend list.</param>
+        public FriendsReadyEventArgs(int count)
+        {
+            this.m_count = count;
+        }
+    }
 
     /// <summary>Contains information on a member of our friends list</summary>
     public class FriendInfoEventArgs : EventArgs

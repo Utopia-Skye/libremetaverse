@@ -30,7 +30,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Drawing;
 using OpenMetaverse.Assets;
-using log4net;
 
 namespace OpenMetaverse.Imaging
 {
@@ -40,20 +39,25 @@ namespace OpenMetaverse.Imaging
     /// </summary>
     public class Baker
     {
-        private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
         #region Properties
         /// <summary>Final baked texture</summary>
-        public AssetTexture BakedTexture { get { return bakedTexture; } }
+        public AssetTexture BakedTexture => bakedTexture;
+
         /// <summary>Component layers</summary>
-        public List<AppearanceManager.TextureData> Textures { get { return textures; } }
+        public List<AppearanceManager.TextureData> Textures => textures;
+
         /// <summary>Width of the final baked image and scratchpad</summary>
-        public int BakeWidth { get { return bakeWidth; } }
+        public int BakeWidth => bakeWidth;
+
         /// <summary>Height of the final baked image and scratchpad</summary>
-        public int BakeHeight { get { return bakeHeight; } }
+        public int BakeHeight => bakeHeight;
+
         /// <summary>Bake type</summary>
-        public BakeType BakeType { get { return bakeType; } }
+        public BakeType BakeType => bakeType;
+
         /// <summary>Is this one of the 3 skin bakes</summary>
-        private bool IsSkin { get { return bakeType == BakeType.Head || bakeType == BakeType.LowerBody || bakeType == BakeType.UpperBody; } }
+        private bool IsSkin => bakeType == BakeType.Head || bakeType == BakeType.LowerBody || bakeType == BakeType.UpperBody;
+
         #endregion
 
         #region Private fields
@@ -85,8 +89,8 @@ namespace OpenMetaverse.Imaging
             }
             else
             {
-                bakeWidth = 512;
-                bakeHeight = 512;
+                bakeWidth = 1024;
+                bakeHeight = 1024;
             }
         }
         #endregion
@@ -130,29 +134,42 @@ namespace OpenMetaverse.Imaging
                 if (tex.Texture == null)
                     continue;
 
-                if (tex.TextureIndex == AvatarTextureIndex.HeadBodypaint ||
-                        tex.TextureIndex == AvatarTextureIndex.UpperBodypaint ||
-                        tex.TextureIndex == AvatarTextureIndex.LowerBodypaint)
-                    skinTexture = tex;
-
-                if (tex.TextureIndex == AvatarTextureIndex.HeadTattoo ||
-                        tex.TextureIndex == AvatarTextureIndex.UpperTattoo ||
-                        tex.TextureIndex == AvatarTextureIndex.LowerTattoo)
-                    tattooTextures.Add(tex);
+                switch (tex.TextureIndex)
+                {
+                    case AvatarTextureIndex.HeadBodypaint:
+                    case AvatarTextureIndex.UpperBodypaint:
+                    case AvatarTextureIndex.LowerBodypaint:
+                        skinTexture = tex;
+                        break;
+                    case AvatarTextureIndex.HeadTattoo:
+                    case AvatarTextureIndex.UpperTattoo:
+                    case AvatarTextureIndex.LowerTattoo:
+                        tattooTextures.Add(tex);
+                        break;
+                }
 
                 if (tex.TextureIndex >= AvatarTextureIndex.LowerAlpha &&
                     tex.TextureIndex <= AvatarTextureIndex.HairAlpha)
                 {
                     if (tex.Texture.Image.Alpha != null)
+                    {
                         alphaWearableTextures.Add(tex.Texture.Image.Clone());
+                    }
                 }
             }
 
             if (bakeType == BakeType.Head)
             {
-                DrawLayer(LoadResourceLayer("head_color.tga"), false);
-                AddAlpha(bakedTexture.Image, LoadResourceLayer("head_alpha.tga"));
-                MultiplyLayerFromAlpha(bakedTexture.Image, LoadResourceLayer("head_skingrain.tga"));
+                if (DrawLayer(LoadResourceLayer("head_color.tga"), false) == true)
+                {
+                    AddAlpha(bakedTexture.Image, LoadResourceLayer("head_alpha.tga"));
+                    MultiplyLayerFromAlpha(bakedTexture.Image, LoadResourceLayer("head_skingrain.tga"));
+                    Logger.Log("[Bake]: created head master bake", Helpers.LogLevel.Debug);
+                }
+                else
+                {
+                    Logger.Log("[Bake]: Unable to draw layer from texture file", Helpers.LogLevel.Debug);
+                }
             }
 
             if (skinTexture.Texture == null)
@@ -260,7 +277,7 @@ namespace OpenMetaverse.Imaging
                         {
                             if (!MaskBelongsToBake(kvp.Key.TGAFile)) continue;
 
-                            if (kvp.Key.MultiplyBlend == true && (kvp.Value > 0f || !kvp.Key.SkipIfZero))
+                            if (kvp.Key.MultiplyBlend && (kvp.Value > 0f || !kvp.Key.SkipIfZero))
                             {
                                 ApplyAlpha(combinedMask, kvp.Key, kvp.Value);
                                 //File.WriteAllBytes(bakeType + "-layer-" + i + "-mask-" + addedMasks + ".tga", combinedMask.ExportTGA());
@@ -321,7 +338,7 @@ namespace OpenMetaverse.Imaging
             }
 
             // Apply any alpha wearable textures to make parts of the avatar disappear
-            m_log.DebugFormat("[XBakes]: Number of alpha wearable textures: {0}", alphaWearableTextures.Count);
+            Logger.Log("[XBakes]: Number of alpha wearable textures: " + alphaWearableTextures.Count.ToString(), Helpers.LogLevel.Debug);
             foreach (ManagedImage img in alphaWearableTextures)
                 AddAlpha(bakedTexture.Image, img);
 
@@ -341,7 +358,10 @@ namespace OpenMetaverse.Imaging
                 {
                     using (Stream stream = Helpers.GetResourceStream(fileName, Settings.RESOURCE_DIR))
                     {
-                        bitmap = LoadTGAClass.LoadTGA(stream);
+                        if (stream != null)
+                        {
+                            bitmap = LoadTGAClass.LoadTGA(stream);
+                        }
                     }
                 }
                 if (bitmap == null)
@@ -408,16 +428,9 @@ namespace OpenMetaverse.Imaging
 
         private bool MaskBelongsToBake(string mask)
         {
-            if ((bakeType == BakeType.LowerBody && mask.Contains("upper"))
-                || (bakeType == BakeType.LowerBody && mask.Contains("shirt"))
-                || (bakeType == BakeType.UpperBody && mask.Contains("lower")))
-            {
-                return false;
-            }
-            else
-            {
-                return true;
-            }
+            return (bakeType != BakeType.LowerBody || !mask.Contains("upper"))
+                   && (bakeType != BakeType.LowerBody || !mask.Contains("shirt"))
+                   && (bakeType != BakeType.UpperBody || !mask.Contains("lower"));
         }
 
         private bool DrawLayer(ManagedImage source, bool addSourceAlpha)
@@ -451,33 +464,65 @@ namespace OpenMetaverse.Imaging
             byte[] sourceAlpha = sourceHasAlpha ? source.Alpha : null;
             byte[] sourceBump = sourceHasBump ? source.Bump : null;
 
+            bool loadedAlpha = false;
             for (int y = 0; y < bakeHeight; y++)
             {
                 for (int x = 0; x < bakeWidth; x++)
                 {
+                    loadedAlpha = false;
+                    alpha = 0;
+                    alphaInv = 0;
+
                     if (sourceHasAlpha)
                     {
-                        alpha = sourceAlpha[i];
-                        alphaInv = (byte)(Byte.MaxValue - alpha);
+                        if (sourceAlpha.Length > i)
+                        {
+                            loadedAlpha = true;
+                            alpha = sourceAlpha[i];
+                            alphaInv = (byte)(Byte.MaxValue - alpha);
+                        }
                     }
 
                     if (sourceHasColor)
                     {
-                        bakedRed[i] = (byte)((bakedRed[i] * alphaInv + sourceRed[i] * alpha) >> 8);
-                        bakedGreen[i] = (byte)((bakedGreen[i] * alphaInv + sourceGreen[i] * alpha) >> 8);
-                        bakedBlue[i] = (byte)((bakedBlue[i] * alphaInv + sourceBlue[i] * alpha) >> 8);
+                        if ((bakedRed.Length > i) && (bakedGreen.Length > i) && (bakedBlue.Length > i))
+                        {
+                            if ((sourceRed.Length > i) && (sourceGreen.Length > i) && (sourceBlue.Length > i))
+                            {
+                                if (loadedAlpha == true)
+                                {
+                                    bakedRed[i] = (byte)((bakedRed[i] * alphaInv + sourceRed[i] * alpha) >> 8);
+                                    bakedGreen[i] = (byte)((bakedGreen[i] * alphaInv + sourceGreen[i] * alpha) >> 8);
+                                    bakedBlue[i] = (byte)((bakedBlue[i] * alphaInv + sourceBlue[i] * alpha) >> 8);
+                                }
+                                else
+                                {
+                                    bakedRed[i] = sourceRed[i];
+                                    bakedGreen[i] = sourceGreen[i];
+                                    bakedBlue[i] = sourceBlue[i];
+                                }
+                            }
+                        }
                     }
 
                     if (addSourceAlpha)
                     {
-                        if (sourceAlpha[i] < bakedAlpha[i])
+                        if ((sourceAlpha.Length > i) && (bakedAlpha.Length > i))
                         {
-                            bakedAlpha[i] = sourceAlpha[i];
+                            if (sourceAlpha[i] < bakedAlpha[i])
+                            {
+                                bakedAlpha[i] = sourceAlpha[i];
+                            }
                         }
                     }
 
                     if (sourceHasBump)
-                        bakedBump[i] = sourceBump[i];
+                    {
+                        if (sourceBump.Length > i)
+                        {
+                            bakedBump[i] = sourceBump[i];
+                        }
+                    }
 
                     ++i;
                 }
@@ -515,7 +560,7 @@ namespace OpenMetaverse.Imaging
         {
             ManagedImage src = LoadResourceLayer(param.TGAFile);
 
-            if (dest == null || src == null || src.Alpha == null) return;
+            if (dest == null || src?.Alpha == null) return;
 
             if ((dest.Channels & ManagedImage.ImageChannels.Alpha) == 0)
             {
@@ -610,21 +655,19 @@ namespace OpenMetaverse.Imaging
             byte gByte = Utils.FloatToByte(g, 0f, 1f);
             byte bByte = Utils.FloatToByte(b, 0f, 1f);
 
-            byte rAlt, gAlt, bAlt;
+            var rAlt = rByte;
+            var gAlt = gByte;
+            var bAlt = bByte;
 
-            rAlt = rByte;
-            gAlt = gByte;
-            bAlt = bByte;
-
-            if (rByte < Byte.MaxValue)
+            if (rByte < byte.MaxValue)
                 rAlt++;
             else rAlt--;
 
-            if (gByte < Byte.MaxValue)
+            if (gByte < byte.MaxValue)
                 gAlt++;
             else gAlt--;
 
-            if (bByte < Byte.MaxValue)
+            if (bByte < byte.MaxValue)
                 bAlt++;
             else bAlt--;
 
@@ -645,7 +688,7 @@ namespace OpenMetaverse.Imaging
                         red[i] = rAlt;
                         green[i] = gByte;
                         blue[i] = bByte;
-                        alpha[i] = Byte.MaxValue;
+                        alpha[i] = byte.MaxValue;
                         bump[i] = 0;
                     }
                     else
@@ -653,7 +696,7 @@ namespace OpenMetaverse.Imaging
                         red[i] = rByte;
                         green[i] = gAlt;
                         blue[i] = bAlt;
-                        alpha[i] = Byte.MaxValue;
+                        alpha[i] = byte.MaxValue;
                         bump[i] = 0;
                     }
 

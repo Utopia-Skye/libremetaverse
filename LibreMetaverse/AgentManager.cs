@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2006-2016, openmetaverse.co
+ * Copyright (c) 2019-2021, Sjofn LLC
  * All rights reserved.
  *
  * - Redistribution and use in source and binary forms, with or without 
@@ -1047,7 +1048,7 @@ namespace OpenMetaverse
             remove { lock (m_GroupChatJoinedLock) { m_GroupChatJoined -= value; } }
         }
 
-        /// <summary>The event subscribers. null if no subcribers</summary>
+        /// <summary>The event subscribers. null if no subscribers</summary>
         private EventHandler<AlertMessageEventArgs> m_AlertMessage;
 
         /// <summary>Raises the AlertMessage event</summary>
@@ -1549,6 +1550,7 @@ namespace OpenMetaverse
             Client.Network.RegisterLoginResponseCallback(Network_OnLoginResponse);
             // Alert Messages
             Client.Network.RegisterCallback(PacketType.AlertMessage, AlertMessageHandler);
+            Client.Network.RegisterCallback(PacketType.AgentAlertMessage, AgentAlertMessageHandler);
             // script control change messages, ie: when an in-world LSL script wants to take control of your agent.
             Client.Network.RegisterCallback(PacketType.ScriptControlChange, ScriptControlChangeHandler);
             // Camera Constraint (probably needs to move to AgentManagerCamera TODO:
@@ -1561,6 +1563,8 @@ namespace OpenMetaverse
 
         #region Chat and instant messages
 
+        protected int message_chunk_group_id = 0; // a int that starts at 1 goes upto 500 (then back to 1)
+
         /// <summary>
         /// Send a text message from the Agent to the Simulator
         /// </summary>
@@ -1568,30 +1572,72 @@ namespace OpenMetaverse
         /// <param name="channel">The channel to send the message on, 0 is the public channel. Channels above 0
         /// can be used however only scripts listening on the specified channel will see the message</param>
         /// <param name="type">Denotes the type of message being sent, shout, whisper, etc.</param>
-        public void Chat(string message, int channel, ChatType type)
+        /// <param name="allow_split_message">Enables large messages to be split into chunks of 900 with [CHUNKGROUPID|CHUNKID|TOTALCHUNKS] at the start</param>
+        /// <param name="hide_chunk_grouping">Hides [CHUNKGROUPID|CHUNKID|TOTALCHUNKS] at the start of chunked messages</param>
+        public void Chat(string message, int channel, ChatType type,bool allow_split_message=true,bool hide_chunk_grouping=true)
         {
-            ChatFromViewerPacket chat = new ChatFromViewerPacket
+            if ((message.Length > 900) && (allow_split_message == true))
             {
-                AgentData =
+                int group_id = message_chunk_group_id;
+                message_chunk_group_id++;
+                if (message_chunk_group_id > 500) message_chunk_group_id = 1;
+                string[] chunks = message.SplitBy(900).ToArray();
+                int chunkid = 1;
+                foreach(string C in chunks)
                 {
-                    AgentID = id,
-                    SessionID = Client.Self.SessionID
-                },
-                ChatData =
-                {
-                    Channel = channel,
-                    Message = Utils.StringToBytes(message),
-                    Type = (byte) type
+                    string chunk_grouping = "";
+                    if(hide_chunk_grouping == false)
+                    {
+                        chunk_grouping = "[" + group_id.ToString() + "|" + chunkid.ToString() + "|"+chunks.Length.ToString()+"]";
+                    }
+                    Chat(""+ chunk_grouping+"" + C + "", channel, type, false);
+                    chunkid++;
                 }
-            };
-
-            Client.Network.SendPacket(chat);
+            }
+            else if ((message.Length > 0) && (message.Length < 1000))
+            {
+                ChatFromViewerPacket chat = new ChatFromViewerPacket
+                {
+                    AgentData =
+                        {
+                            AgentID = id,
+                            SessionID = Client.Self.SessionID
+                        },
+                    ChatData =
+                        {
+                            Channel = channel,
+                            Message = Utils.StringToBytes(message),
+                            Type = (byte) type
+                        }
+                };
+                Client.Network.SendPacket(chat);
+            }
         }
 
         /// <summary>
         /// Request any instant messages sent while the client was offline to be resent.
         /// </summary>
         public void RetrieveInstantMessages()
+        {
+            Uri offlineMsgsCap = Client.Network.CurrentSim.Caps.CapabilityURI("ReadOfflineMsgs");
+            if (offlineMsgsCap == null 
+                || Client.Network.CurrentSim.Caps.CapabilityURI("AcceptFriendship") == null
+                || Client.Network.CurrentSim.Caps.CapabilityURI("AcceptGroupInvite") == null)
+            {
+                // fallback to lludp
+                RetrieveInstantMessagesLegacy();
+                return;
+            }
+
+            var request = new CapsClient(offlineMsgsCap);
+            request.OnComplete += OfflineMessageHandlerCallback;
+            request.GetRequestAsync(Client.Settings.CAPS_TIMEOUT);
+        }
+
+        /// <summary>
+        /// Request offline instant messages via the legacy LLUDP packet
+        /// </summary>
+        private void RetrieveInstantMessagesLegacy()
         {
             RetrieveInstantMessagesPacket p = new RetrieveInstantMessagesPacket
             {
@@ -1878,7 +1924,7 @@ namespace OpenMetaverse
             if (request != null)
             {
                 ChatSessionAcceptInvitation acceptInvite = new ChatSessionAcceptInvitation {SessionID = session_id};
-                request.BeginGetResponse(acceptInvite.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+                request.PostRequestAsync(acceptInvite.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
 
                 lock (GroupChatSessions.Dictionary)
                     if (!GroupChatSessions.ContainsKey(session_id))
@@ -1917,7 +1963,7 @@ namespace OpenMetaverse
 
                 startConference.SessionID = tmp_session_id;
 
-                request.BeginGetResponse(startConference.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+                request.PostRequestAsync(startConference.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
             }
             else
             {
@@ -2347,6 +2393,9 @@ namespace OpenMetaverse
 
         #region Touch and grab
 
+        public static readonly Vector3 TOUCH_INVALID_TEXCOORD = new Vector3(-1.0f, -1.0f, 0.0f);
+        public static readonly Vector3 TOUCH_INVALID_VECTOR = Vector3.Zero;
+
         /// <summary>
         /// Grabs an object
         /// </summary>
@@ -2354,7 +2403,8 @@ namespace OpenMetaverse
         /// <seealso cref="Simulator.ObjectsPrimitives"/>
         public void Grab(uint objectLocalID)
         {
-            Grab(objectLocalID, Vector3.Zero, Vector3.Zero, Vector3.Zero, 0, Vector3.Zero, Vector3.Zero, Vector3.Zero);
+            Grab(objectLocalID, Vector3.Zero, TOUCH_INVALID_TEXCOORD, TOUCH_INVALID_TEXCOORD, 
+                0, TOUCH_INVALID_VECTOR, TOUCH_INVALID_VECTOR, TOUCH_INVALID_VECTOR);
         }
 
         /// <summary>
@@ -2366,11 +2416,11 @@ namespace OpenMetaverse
         /// <param name="stCoord">The surface coordinates to grab</param>
         /// <param name="faceIndex">The face of the position to grab</param>
         /// <param name="position">The region coordinates of the position to grab</param>
-        /// <param name="normal">The surface normal of the position to grab (A normal is a vector perpindicular to the surface)</param>
-        /// <param name="binormal">The surface binormal of the position to grab (A binormal is a vector tangen to the surface
+        /// <param name="normal">The surface normal of the position to grab (A normal is a vector perpendicular to the surface)</param>
+        /// <param name="binormal">The surface bi-normal of the position to grab (A bi-normal is a vector tangent to the surface
         /// pointing along the U direction of the tangent space</param>
-        public void Grab(uint objectLocalID, Vector3 grabOffset, Vector3 uvCoord, Vector3 stCoord, int faceIndex, Vector3 position,
-            Vector3 normal, Vector3 binormal)
+        public void Grab(uint objectLocalID, Vector3 grabOffset, Vector3 uvCoord, Vector3 stCoord, 
+            int faceIndex, Vector3 position, Vector3 normal, Vector3 binormal)
         {
             ObjectGrabPacket grab = new ObjectGrabPacket
             {
@@ -2407,7 +2457,8 @@ namespace OpenMetaverse
         /// <param name="grabPosition">Drag target in region coordinates</param>
         public void GrabUpdate(UUID objectID, Vector3 grabPosition)
         {
-            GrabUpdate(objectID, grabPosition, Vector3.Zero, Vector3.Zero, Vector3.Zero, 0, Vector3.Zero, Vector3.Zero, Vector3.Zero);
+            GrabUpdate(objectID, grabPosition, Vector3.Zero, Vector3.Zero, Vector3.Zero, 
+                0, Vector3.Zero, Vector3.Zero, Vector3.Zero);
         }
 
         /// <summary>
@@ -2420,11 +2471,11 @@ namespace OpenMetaverse
         /// <param name="stCoord">The surface coordinates to grab</param>
         /// <param name="faceIndex">The face of the position to grab</param>
         /// <param name="position">The region coordinates of the position to grab</param>
-        /// <param name="normal">The surface normal of the position to grab (A normal is a vector perpindicular to the surface)</param>
-        /// <param name="binormal">The surface binormal of the position to grab (A binormal is a vector tangen to the surface
+        /// <param name="normal">The surface normal of the position to grab (A normal is a vector perpendicular to the surface)</param>
+        /// <param name="binormal">The surface bi-normal of the position to grab (A bi-normal is a vector tangent to the surface
         /// pointing along the U direction of the tangent space</param>
-        public void GrabUpdate(UUID objectID, Vector3 grabPosition, Vector3 grabOffset, Vector3 uvCoord, Vector3 stCoord, int faceIndex, Vector3 position,
-            Vector3 normal, Vector3 binormal)
+        public void GrabUpdate(UUID objectID, Vector3 grabPosition, Vector3 grabOffset, Vector3 uvCoord, Vector3 stCoord, 
+            int faceIndex, Vector3 position, Vector3 normal, Vector3 binormal)
         {
             ObjectGrabUpdatePacket grab = new ObjectGrabUpdatePacket
             {
@@ -2465,7 +2516,8 @@ namespace OpenMetaverse
         /// <seealso cref="GrabUpdate"/>
         public void DeGrab(uint objectLocalID)
         {
-            DeGrab(objectLocalID, Vector3.Zero, Vector3.Zero, 0, Vector3.Zero, Vector3.Zero, Vector3.Zero);
+            DeGrab(objectLocalID, TOUCH_INVALID_TEXCOORD, TOUCH_INVALID_TEXCOORD, 
+                0, TOUCH_INVALID_VECTOR, TOUCH_INVALID_VECTOR, TOUCH_INVALID_VECTOR);
         }
 
         /// <summary>
@@ -2476,11 +2528,11 @@ namespace OpenMetaverse
         /// <param name="stCoord">The surface coordinates to grab</param>
         /// <param name="faceIndex">The face of the position to grab</param>
         /// <param name="position">The region coordinates of the position to grab</param>
-        /// <param name="normal">The surface normal of the position to grab (A normal is a vector perpindicular to the surface)</param>
-        /// <param name="binormal">The surface binormal of the position to grab (A binormal is a vector tangen to the surface
+        /// <param name="normal">The surface normal of the position to grab (A normal is a vector perpendicular to the surface)</param>
+        /// <param name="binormal">The surface bi-normal of the position to grab (A bi-normal is a vector tangent to the surface
         /// pointing along the U direction of the tangent space</param>
-        public void DeGrab(uint objectLocalID, Vector3 uvCoord, Vector3 stCoord, int faceIndex, Vector3 position,
-            Vector3 normal, Vector3 binormal)
+        public void DeGrab(uint objectLocalID, Vector3 uvCoord, Vector3 stCoord, 
+            int faceIndex, Vector3 position, Vector3 normal, Vector3 binormal)
         {
             ObjectDeGrabPacket degrab = new ObjectDeGrabPacket
             {
@@ -2658,7 +2710,7 @@ namespace OpenMetaverse
         /// <param name="gestureID">Asset <seealso cref="UUID"/> of the gesture</param>
         public void PlayGesture(UUID gestureID)
         {
-            Thread t = new Thread(delegate()
+            ThreadPool.QueueUserWorkItem((_) =>
             {
                 // First fetch the guesture
                 AssetGesture gesture = null;
@@ -2757,13 +2809,7 @@ namespace OpenMetaverse
                             break;
                     }
                 }
-            })
-            {
-                IsBackground = true,
-                Name = $"Gesture thread: {gestureID}"
-            };
-
-            t.Start();
+            });
         }
 
         /// <summary>
@@ -3174,6 +3220,29 @@ namespace OpenMetaverse
             }
         }
 
+        /// <summary>
+        /// Request a teleport lure from another agent
+        /// </summary>
+        /// <param name="targetID"><seealso cref="UUID"/> of the avatar lure is being requested from</param>
+        /// <param name="sessionID">IM session <seealso cref="UUID"/></param>
+        /// <param name="message">message to send with request</param>
+        public void SendTeleportLureRequest(UUID targetID, UUID sessionID, string message)
+        {
+            if (targetID != AgentID)
+            {
+                InstantMessage(Name, targetID, message, sessionID, InstantMessageDialog.RequestLure,
+                InstantMessageOnline.Online, SimPosition, UUID.Zero, Utils.EmptyBytes);
+            }
+        }
+        public void SendTeleportLureRequest(UUID targetID, string message)
+        {
+            SendTeleportLureRequest(targetID, targetID, message);
+        }
+        public void SendTeleportLureRequest(UUID targetID)
+        {
+            SendTeleportLureRequest(targetID, "Hi there I would like to teleport to you");
+        }
+
         #endregion Teleporting
 
         #region Misc
@@ -3208,7 +3277,7 @@ namespace OpenMetaverse
         }
 
         /// <summary>
-        /// Update agents profile interests
+        /// Update agent's profile interests
         /// </summary>
         /// <param name="interests">selection of interests from <seealso cref="T:OpenMetaverse.Avatar.Interests"/> struct</param>
         public void UpdateInterests(Avatar.Interests interests)
@@ -3231,6 +3300,29 @@ namespace OpenMetaverse
             };
 
             Client.Network.SendPacket(aiup);
+        }
+
+        /// <summary>
+        /// Update agent's private notes for target avatar
+        /// </summary>
+        /// <param name="target">target avatar for notes</param>
+        /// <param name="notes">notes to store</param>
+        public void UpdateProfileNotes(UUID target, string notes)
+        {
+            AvatarNotesUpdatePacket anup = new AvatarNotesUpdatePacket
+            {
+                AgentData =
+                {
+                    AgentID = id,
+                    SessionID = sessionID
+                },
+                Data =
+                {
+                    TargetID = target,
+                    Notes = Utils.StringToBytes(notes)
+                }
+            };
+            Client.Network.SendPacket(anup);
         }
 
         /// <summary>
@@ -3548,7 +3640,7 @@ namespace OpenMetaverse
         /// Create or update profile Classified
         /// </summary>
         /// <param name="classifiedID">UUID of the classified to update, or random UUID to create a new classified</param>
-        /// <param name="category">Defines what catagory the classified is in</param>
+        /// <param name="category">Defines what category the classified is in</param>
         /// <param name="snapshotID">UUID of the image displayed with the classified</param>
         /// <param name="price">Price that the classified will cost to place for a week</param>
         /// <param name="position">Global position of the classified landmark</param>
@@ -3587,7 +3679,7 @@ namespace OpenMetaverse
         /// Create or update profile Classified
         /// </summary>
         /// <param name="classifiedID">UUID of the classified to update, or random UUID to create a new classified</param>
-        /// <param name="category">Defines what catagory the classified is in</param>
+        /// <param name="category">Defines what category the classified is in</param>
         /// <param name="snapshotID">UUID of the image displayed with the classified</param>
         /// <param name="price">Price that the classified will cost to place for a week</param>
         /// <param name="name">Name of the classified</param>
@@ -3646,7 +3738,7 @@ namespace OpenMetaverse
                     }
                 };
 
-                request.BeginGetResponse(Client.Settings.CAPS_TIMEOUT);
+                request.GetRequestAsync(Client.Settings.CAPS_TIMEOUT);
             }
             catch (Exception ex)
             {
@@ -3656,7 +3748,7 @@ namespace OpenMetaverse
         }
 
         /// <summary>
-        /// Initates request to set a new display name
+        /// Initiates request to set a new display name
         /// </summary>
         /// <param name="oldName">Previous display name</param>
         /// <param name="newName">Desired new display name</param>
@@ -3684,7 +3776,7 @@ namespace OpenMetaverse
                 NewDisplayName = newName
             };
 
-            request.BeginGetResponse(msg.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+            request.PostRequestAsync(msg.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
         }
 
         /// <summary>
@@ -3703,7 +3795,7 @@ namespace OpenMetaverse
                 };
 
                 CapsClient request = Client.Network.CurrentSim.Caps.CreateCapsClient("UpdateAgentLanguage");
-                request?.BeginGetResponse(msg.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+                request?.PostRequestAsync(msg.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
             }
             catch (Exception ex)
             {
@@ -3761,11 +3853,12 @@ namespace OpenMetaverse
                 }
 
             };
-            OSDMap req = new OSDMap();
-            OSDMap prefs = new OSDMap {["max"] = access};
-            req["access_prefs"] = prefs;
+            OSDMap req = new OSDMap
+            {
+                ["access_prefs"] = new OSDMap { ["max"] = access }
+            };
 
-            request.BeginGetResponse(req, OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+            request.PostRequestAsync(req, OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
         }
 
         /// <summary>
@@ -3804,7 +3897,7 @@ namespace OpenMetaverse
             var postData = new OSDMap {
                 ["hover_height"] = hoverHeight
             };
-            request.BeginGetResponse(postData, OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+            request.PostRequestAsync(postData, OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
         }
 
         #endregion Misc
@@ -3844,6 +3937,59 @@ namespace OpenMetaverse
                 message.BinaryBucket = im.MessageBlock.BinaryBucket;
 
                 OnInstantMessage(new InstantMessageEventArgs(message, simulator));
+            }
+        }
+
+        protected void OfflineMessageHandlerCallback(CapsClient client, OSD response, Exception error)
+        {
+            if (error != null) {
+                Logger.Log($"Failed to retrieve offline messages from the simulator: {error.Message}",
+                    Helpers.LogLevel.Warning);
+                RetrieveInstantMessagesLegacy();
+                return; 
+            }
+
+            if (m_InstantMessage == null) return; // don't bother if we don't have any listeners
+
+            if (response == null || !(response is OSDMap respMap) 
+                || respMap.Count == 0 || respMap.ContainsKey("messages"))
+            {
+                Logger.Log($"Failed to retrieve offline messages because the capability returned some goofy shit.",
+                    Helpers.LogLevel.Warning);
+                RetrieveInstantMessagesLegacy();
+                return;
+            }
+
+            if (respMap["messages"] is OSDArray msgArray)
+            {
+                foreach (var osd in msgArray)
+                {
+                    var msg = (OSDMap)osd;
+
+                    InstantMessage message;
+                    message.FromAgentID = msg["from_agent_id"].AsUUID();
+                    message.FromAgentName = msg["from_agent_name"].AsString();
+                    message.ToAgentID = msg["to_agent_id"].AsUUID();
+                    message.RegionID = msg["region_id"].AsUUID();
+                    message.Dialog = (InstantMessageDialog)msg["dialog"].AsInteger();
+                    message.IMSessionID = msg["transaction-id"].AsUUID();
+                    message.Timestamp = new DateTime(msg["timestamp"].AsInteger());
+                    message.Message = msg["message"].AsString();
+                    message.Offline = msg.ContainsKey("offline")
+                        ? (InstantMessageOnline)msg["offline"].AsInteger() 
+                        : InstantMessageOnline.Offline;
+                    message.ParentEstateID = msg.ContainsKey("parent_estate_id")
+                        ? msg["parent_estate_id"].AsUInteger() : 1;
+                    message.Position = msg.ContainsKey("position")
+                        ? msg["position"].AsVector3()
+                        : new Vector3(msg["local_x"], msg["local_y"], msg["local_z"]);
+                    message.BinaryBucket = msg.ContainsKey("binary_bucket")
+                        ? msg["binary_bucket"].AsBinary() : new byte[] { 0 };
+                    message.GroupIM = msg.ContainsKey("from_group")
+                        ? msg["from_group"].AsBoolean() : false;
+
+                    OnInstantMessage(new InstantMessageEventArgs(message, null));
+                }                
             }
         }
 
@@ -4079,9 +4225,9 @@ namespace OpenMetaverse
 
         protected void AgentStateUpdateEventHandler(string capsKey, IMessage message, Simulator simulator)
         {
-            if (message is AgentStateUpdateMessage)
+            if (message is AgentStateUpdateMessage updateMessage)
             {
-                AgentStateStatus = (AgentStateUpdateMessage)message;
+                AgentStateStatus = updateMessage;
             }
         }
 
@@ -4102,7 +4248,7 @@ namespace OpenMetaverse
             }
             else
             {
-                Logger.Log("Got EstablishAgentCommunication for " + sim.ToString(),
+                Logger.Log("Got EstablishAgentCommunication for " + sim,
                     Helpers.LogLevel.Info, Client);
 
                 sim.SetSeedCaps(msg.SeedCapability.ToString());
@@ -4320,7 +4466,7 @@ namespace OpenMetaverse
 
             if (m_AnimationsChanged != null)
             {
-                WorkPool.QueueUserWorkItem(delegate(object o)
+                ThreadPool.QueueUserWorkItem(delegate(object o)
                 { OnAnimationsChanged(new AnimationsChangedEventArgs(this.SignaledAnimations)); });
             }
 
@@ -4624,7 +4770,7 @@ namespace OpenMetaverse
                     AgentID = memberID
                 };
 
-                request.BeginGetResponse(req.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
+                request.PostRequestAsync(req.Serialize(), OSDFormat.Xml, Client.Settings.CAPS_TIMEOUT);
             }
             else
             {
@@ -4642,7 +4788,31 @@ namespace OpenMetaverse
 
             AlertMessagePacket alert = (AlertMessagePacket)packet;
 
-            OnAlertMessage(new AlertMessageEventArgs(Utils.BytesToString(alert.AlertData.Message)));
+            string message = Utils.BytesToString(alert.AlertData.Message);
+
+            if (alert.AlertInfo.Length > 0)
+            {
+                string notificationid = Utils.BytesToString(alert.AlertInfo[0].Message);
+                OSDMap extra = (alert.AlertInfo[0].ExtraParams != null && alert.AlertInfo[0].ExtraParams.Length > 0)
+                    ? OSDParser.Deserialize(alert.AlertInfo[0].ExtraParams) as OSDMap
+                    : null;
+                OnAlertMessage(new AlertMessageEventArgs(message, notificationid, extra));
+            }
+            else
+            {
+                OnAlertMessage(new AlertMessageEventArgs(message, null, null));
+            }
+        }
+
+        protected void AgentAlertMessageHandler(object sender, PacketReceivedEventArgs e)
+        {
+            if (m_AlertMessage == null) return;
+            Packet packet = e.Packet;
+
+            AgentAlertMessagePacket alert = (AgentAlertMessagePacket)packet;
+            // HACK: Agent alerts support modal and Generic Alerts do not, but it's all the same for
+            //       my simplified ass right now.
+            OnAlertMessage(new AlertMessageEventArgs(Utils.BytesToString(alert.AlertData.Message), null, null));
         }
 
         /// <summary>Process an incoming packet and raise the appropriate events</summary>
@@ -4699,7 +4869,7 @@ namespace OpenMetaverse
                 return;
             }
 
-            WorkPool.QueueUserWorkItem(sync =>
+            ThreadPool.QueueUserWorkItem(sync =>
             {
                 using (AutoResetEvent gotMuteList = new AutoResetEvent(false))
                 {
@@ -5260,16 +5430,21 @@ namespace OpenMetaverse
     /// <summary>Data sent by the simulator containing urgent messages</summary>
     public class AlertMessageEventArgs : EventArgs
     {
-        /// <summary>Get the alert message</summary>
         public string Message { get; }
+        public string NotificationId { get; }
+        public OSDMap ExtraParams { get; }
 
         /// <summary>
         /// Construct a new instance of the AlertMessageEventArgs class
         /// </summary>
-        /// <param name="message">The alert message</param>
-        public AlertMessageEventArgs(string message)
+        /// <param name="message">user readable message</param>
+        /// <param name="notificationid">notification id for alert, may be null</param>
+        /// <param name="extraparams">any extra params in OSD format, may be null</param>
+        public AlertMessageEventArgs(string message, string notificationid, OSDMap extraparams)
         {
             Message = message;
+            NotificationId = notificationid;
+            ExtraParams = extraparams;
         }
     }
 
