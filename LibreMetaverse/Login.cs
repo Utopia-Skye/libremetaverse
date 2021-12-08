@@ -262,6 +262,13 @@ namespace OpenMetaverse
         public int BuddyRightsHas;
     }
 
+    public struct HomeInfo
+    {
+        public ulong RegionHandle;
+        public Vector3 Position;
+        public Vector3 LookAt;
+    }
+
     /// <summary>
     /// The decoded data returned from the login server after a successful login
     /// </summary>
@@ -287,9 +294,7 @@ namespace OpenMetaverse
         public string AgentRegionAccess;
         public string InitialOutfit;
         public Vector3 LookAt;
-        public ulong HomeRegion;
-        public Vector3 HomePosition;
-        public Vector3 HomeLookAt;
+        public HomeInfo Home;
         public int CircuitCode;
         public uint RegionX;
         public uint RegionY;
@@ -375,19 +380,19 @@ namespace OpenMetaverse
                 if (home.TryGetValue("region_handle", out homeRegion) && homeRegion.Type == OSDType.Array)
                 {
                     var homeArray = (OSDArray)homeRegion;
-                    HomeRegion = homeArray.Count == 2
+                    Home.RegionHandle = homeArray.Count == 2
                         ? Utils.UIntsToLong((uint)homeArray[0].AsInteger(), (uint)homeArray[1].AsInteger())
                         : 0;
                 }
 
-                HomePosition = ParseVector3("position", home);
-                HomeLookAt = ParseVector3("look_at", home);
+                Home.Position = ParseVector3("position", home);
+                Home.LookAt = ParseVector3("look_at", home);
             }
             else
             {
-                HomeRegion = 0;
-                HomePosition = Vector3.Zero;
-                HomeLookAt = Vector3.Zero;
+                Home.RegionHandle = 0;
+                Home.Position = Vector3.Zero;
+                Home.LookAt = Vector3.Zero;
             }
 
             CircuitCode = (int)ParseUInt("circuit_code", reply);
@@ -466,38 +471,71 @@ namespace OpenMetaverse
             {
                 Logger.Log("Login server returned (some) invalid data: " + e.Message, Helpers.LogLevel.Warning);
             }
-            if (!Success)
-                return;
+            if (!Success) { return; }
 
-            // Home
-            if (reply.ContainsKey("home"))
+            // HomeInfo
+            try
             {
-                var osdHome = OSDParser.DeserializeLLSDNotation(reply["home"].ToString());
-
-                if (osdHome.Type == OSDType.Map)
+                if (reply.ContainsKey("home_info"))
                 {
-                    var home = (OSDMap)osdHome;
-
-                    OSD homeRegion;
-                    if (home.TryGetValue("region_handle", out homeRegion) && homeRegion.Type == OSDType.Array)
+                    if (reply?["home_info"] is Hashtable map)
                     {
-                        var homeArray = (OSDArray)homeRegion;
-                        if (homeArray.Count == 2)
-                            HomeRegion = Utils.UIntsToLong((uint)homeArray[0].AsInteger(),
-                                                           (uint)homeArray[1].AsInteger());
-                        else
-                            HomeRegion = 0;
-                    }
+                        Home.Position = ParseVector3("position", map);
+                        Home.LookAt = ParseVector3("look_at", map);
 
-                    HomePosition = ParseVector3("position", home);
-                    HomeLookAt = ParseVector3("look_at", home);
+                        var coords = (OSDArray)OSDParser.DeserializeLLSDNotation(map["region_handle"].ToString());
+                        if (coords.Type == OSDType.Array)
+                        {
+                            Home.RegionHandle = (coords.Count == 2)
+                                ? Utils.UIntsToLong((uint)coords[0].AsInteger(), (uint)coords[1].AsInteger()) : 0;
+                        }
+                    }
                 }
-            }
-            else
+
+                // Home
+                if (Home.RegionHandle == 0 && reply.ContainsKey("home"))
+                {
+                    if (reply?["home"] is Hashtable map)
+                    {
+                        Home.Position = ParseVector3("position", map);
+                        Home.LookAt = ParseVector3("look_at", map);
+
+                        var coords = (OSDArray)OSDParser.DeserializeLLSDNotation(map["region_handle"].ToString());
+                        if (coords.Type == OSDType.Array)
+                        {
+                            Home.RegionHandle = (coords.Count == 2)
+                                ? Utils.UIntsToLong((uint)coords[0].AsInteger(), (uint)coords[1].AsInteger()) : 0;
+                        }
+                    }
+                    else if (reply?["home"] is string osdString)
+                    {
+                        var osdHome = OSDParser.DeserializeLLSDNotation(reply["home"].ToString());
+
+                        if (osdHome.Type == OSDType.Map)
+                        {
+                            var home = (OSDMap)osdHome;
+
+                            OSD homeRegion;
+                            if (home.TryGetValue("region_handle", out homeRegion) && homeRegion.Type == OSDType.Array)
+                            {
+                                var coords = (OSDArray)homeRegion;
+                                Home.RegionHandle = (coords.Count == 2)
+                                    ? Utils.UIntsToLong((uint)coords[0].AsInteger(), (uint)coords[1].AsInteger()) : 0;
+
+                            }
+                            Home.Position = ParseVector3("position", home);
+                            Home.LookAt = ParseVector3("look_at", home);
+                        }
+                    }
+                    else
+                    {
+                        throw new Exception("Could not parse 'home' in Login Response");
+                    }
+                }
+            } catch (Exception ex)
             {
-                HomeRegion = 0;
-                HomePosition = Vector3.Zero;
-                HomeLookAt = Vector3.Zero;
+                Logger.Log("Could not parse home info from login response. Setting nil", Helpers.LogLevel.Warning, ex);
+                Home = new HomeInfo();
             }
 
             CircuitCode = (int)ParseUInt("circuit_code", reply);
