@@ -26,6 +26,7 @@
 
 using System;
 using System.Security.Cryptography;
+using ProtoBuf;
 
 namespace OpenMetaverse
 {
@@ -33,10 +34,11 @@ namespace OpenMetaverse
     /// A 128-bit Universally Unique Identifier, used throughout the Second
     /// Life networking protocol
     /// </summary>
-    [Serializable]
+    [Serializable, ProtoContract]
     public struct UUID : IComparable<UUID>, IEquatable<UUID>
     {
         /// <summary>The System.Guid object this struct wraps around</summary>
+        [ProtoMember(1)]
         public Guid Guid { get; set; }
 
         #region Constructors
@@ -297,9 +299,8 @@ namespace OpenMetaverse
         /// <returns>True if the object is a UUID and both UUIDs are equal</returns>
         public override bool Equals(object o)
         {
-            if (!(o is UUID)) return false;
+            if (!(o is UUID uuid)) return false;
 
-            UUID uuid = (UUID)o;
             return Guid == uuid.Guid;
         }
 

@@ -26,12 +26,10 @@
 
 using System;
 using OpenMetaverse.StructuredData;
+using ProtoBuf;
 
 namespace OpenMetaverse
 {
-    /// <summary>
-    /// 
-    /// </summary>
     [Flags]
     public enum PermissionMask : uint
     {
@@ -47,9 +45,6 @@ namespace OpenMetaverse
         All = (1 << 13) | (1 << 14) | (1 << 15) | (1 << 19)
     }
 
-    /// <summary>
-    /// 
-    /// </summary>
     [Flags]
     public enum PermissionWho : byte
     {
@@ -67,10 +62,7 @@ namespace OpenMetaverse
         All = 0x1F
     }
 
-    /// <summary>
-    /// 
-    /// </summary>
-    [Serializable()]
+    [Serializable, ProtoContract(ImplicitFields = ImplicitFields.AllFields)]
     public struct Permissions
     {
         public PermissionMask BaseMask;

@@ -2,8 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Reflection;
-using System.Xml;
-using OpenMetaverse;
 using OpenMetaverse.Packets;
 using OpenMetaverse.Utilities;
 
@@ -100,7 +98,7 @@ namespace OpenMetaverse.TestClient
 
         void Self_IM(object sender, InstantMessageEventArgs e)
         {
-            bool groupIM = e.IM.GroupIM && GroupMembers != null && GroupMembers.ContainsKey(e.IM.FromAgentID) ? true : false;
+            bool groupIM = e.IM.GroupIM && GroupMembers != null && GroupMembers.ContainsKey(e.IM.FromAgentID);
 
             if (e.IM.FromAgentID == MasterKey || (GroupCommands && groupIM))
             {

@@ -8,11 +8,15 @@ environment:
   matrix:
   - job_name: Windows Build
     platform: x64
-    appveyor_build_worker_image: Visual Studio 2019
+    appveyor_build_worker_image: Visual Studio 2022
     configuration: Release
+  - job_name: Linux Build
+    platform: x64
+    appveyor_build_worker_image: Ubuntu2004
+    configuration: ReleaseNoGui
   - job_name: MacOS Build
     platform: x64
-    appveyor_build_worker_image: macos
+    appveyor_build_worker_image: macOS
     configuration: ReleaseNoGui
 
   LMVTestAgentUsername: SecretAgentTest Resident
@@ -24,6 +28,11 @@ environment:
     secure: qzHJldnavMFT8+Cm2eXndg==
   PfxPassword:
     secure: +vWSGzLkiBGVIxfPb+iRtD+/maQjI2d92hN4PoNAxMc=
+
+matrix:
+  allow_failures:
+  - image: macOS
+  - image: Ubuntu2004
 
 pull_requests:
   do_not_increment_build_number: false
@@ -44,7 +53,7 @@ cache:
 
 dotnet_csproj:
   patch: true
-  file: '**\*.csproj'
+  file: '**\*.csproj;**\*.props'
   version: '{version}'
   package_version: '{version}'
 
@@ -63,7 +72,7 @@ deploy:
     api_key:
       secure: Mvs+45lPmiSYC9hv3AqdKWJVEzA5B5w0iU2IUCRz2/cxow/s00suGcO326h4Gjt7
     artifact: /.*LibreMetaverse.*\.nupkg/
-    skip_symbols: true
+    skip_symbols: false
     draft: false
     prerelease: false
     on:
@@ -76,7 +85,7 @@ deploy:
     auth_token:
       secure: lzcaOIXHRZG5WwFThR/DpNiVFh/q4zVis8YcLkmXhJHjFsq8tZgewzVhTmopZhjW
     artifact: /.*LibreMetaverse.*\.nupkg/
-    skip_symbols: true
+    skip_symbols: false
     draft: false
     prerelease: false
     on:

@@ -27,23 +27,29 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Globalization;
+using ProtoBuf;
 
 namespace OpenMetaverse
 {
     [Serializable]
+    [ProtoContract]
     [StructLayout(LayoutKind.Sequential)]
     public struct Quaternion : IEquatable<Quaternion>
     {
         /// <summary>X value</summary>
+        [ProtoMember(1)]
         public float X;
 
         /// <summary>Y value</summary>
+        [ProtoMember(2)]
         public float Y;
 
         /// <summary>Z value</summary>
+        [ProtoMember(3)]
         public float Z;
 
         /// <summary>W value</summary>
+        [ProtoMember(4)]
         public float W;
 
         #region Constructors
@@ -319,6 +325,15 @@ namespace OpenMetaverse
             //    pitch = (float)Math.Asin(2f * test / unit);
             //    roll = (float)Math.Atan2(2f * X * W - 2f * Y * Z, -sqx + sqy - sqz + sqw);
             //}
+        }
+
+        /// <summary>
+        /// Convert quaternion to euler angles vector
+        /// </summary>
+        /// <returns></returns>
+        public Vector3 ToEulerVector() {
+	        GetEulerAngles(out float r, out float p, out float y);
+	        return new Vector3(r, p, y);
         }
 
         /// <summary>

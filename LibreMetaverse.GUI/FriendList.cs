@@ -25,8 +25,6 @@
  */
 
 using System;
-using System.Collections;
-using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -109,7 +107,7 @@ namespace OpenMetaverse.GUI
 
         private void RefreshFriends()
         {
-            if (this.InvokeRequired) this.BeginInvoke((MethodInvoker)delegate { RefreshFriends(); });
+            if (this.InvokeRequired) this.BeginInvoke((MethodInvoker)RefreshFriends);
             else
             {
                 Client.Friends.FriendList.ForEach(delegate(FriendInfo friend)
