@@ -1,8 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Text;
-using OpenMetaverse;
-using OpenMetaverse.Packets;
 
 namespace OpenMetaverse.TestClient
 {
@@ -29,7 +25,7 @@ namespace OpenMetaverse.TestClient
             }
             else
             {
-                Console.WriteLine("Teleporting to " + landmark.ToString());
+                Console.WriteLine("Teleporting to " + landmark);
             }
             if (Client.Self.Teleport(landmark))
             {

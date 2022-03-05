@@ -1,8 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Text;
-using OpenMetaverse;
-using OpenMetaverse.Packets;
 
 namespace OpenMetaverse.TestClient
 {
@@ -38,7 +34,7 @@ namespace OpenMetaverse.TestClient
                 }
             }
 
-            return "Master set to " + Client.MasterKey.ToString();
+            return "Master set to " + Client.MasterKey;
         }
     }
 }

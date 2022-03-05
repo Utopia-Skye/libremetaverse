@@ -1,8 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Text;
-using OpenMetaverse;
-using OpenMetaverse.Packets;
 
 namespace OpenMetaverse.TestClient
 {
@@ -18,7 +14,7 @@ namespace OpenMetaverse.TestClient
         public override string Execute(string[] args, UUID fromAgentID)
 		{
             Primitive closest = null;
-		    double closestDistance = Double.MaxValue;
+		    double closestDistance = double.MaxValue;
 
             Client.Network.CurrentSim.ObjectsPrimitives.ForEach(
                 delegate(Primitive prim)

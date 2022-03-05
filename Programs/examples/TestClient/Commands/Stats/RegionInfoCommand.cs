@@ -1,6 +1,6 @@
 using System;
+using System.Globalization;
 using System.Text;
-using OpenMetaverse;
 
 namespace OpenMetaverse.TestClient
 {
@@ -21,7 +21,7 @@ namespace OpenMetaverse.TestClient
             output.AppendLine(Client.Network.CurrentSim.ID.ToString());
             uint x, y;
             Utils.LongToUInts(Client.Network.CurrentSim.Handle, out x, out y);
-            output.AppendLine(String.Format("Handle: {0} (X: {1} Y: {2})", Client.Network.CurrentSim.Handle, x, y));
+            output.AppendLine($"Handle: {Client.Network.CurrentSim.Handle} (X: {x} Y: {y})");
             output.Append("Access: ");
             output.AppendLine(Client.Network.CurrentSim.Access.ToString());
             output.Append("Flags: ");
@@ -43,7 +43,7 @@ namespace OpenMetaverse.TestClient
             output.Append("TerrainDetail3: ");
             output.AppendLine(Client.Network.CurrentSim.TerrainDetail3.ToString());
             output.Append("Water Height: ");
-            output.AppendLine(Client.Network.CurrentSim.WaterHeight.ToString());
+            output.AppendLine(Client.Network.CurrentSim.WaterHeight.ToString(CultureInfo.InvariantCulture));
             output.Append("Datacenter:");
             output.AppendLine(Client.Network.CurrentSim.ColoLocation);
             output.Append("CPU Ratio:");

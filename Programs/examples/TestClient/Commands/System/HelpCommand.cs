@@ -1,8 +1,5 @@
-using System;
 using System.Collections.Generic;
 using System.Text;
-using OpenMetaverse;
-using OpenMetaverse.Packets;
 
 namespace OpenMetaverse.TestClient
 {
@@ -29,21 +26,17 @@ namespace OpenMetaverse.TestClient
 
             CommandCategory cc;
 			foreach (Command c in Client.Commands.Values)
-			{
-                if (c.Category.Equals(null))
-                    cc = CommandCategory.Unknown;
-                else
-                    cc = c.Category;
+            {
+                cc = c.Category.Equals(null) ? CommandCategory.Unknown : c.Category;
 
                 if (CommandTree.ContainsKey(cc))
                     CommandTree[cc].Add(c);
                 else
                 {
-                    List<Command> l = new List<Command>();
-                    l.Add(c);
+                    List<Command> l = new List<Command> { c };
                     CommandTree.Add(cc, l);
                 }
-			}
+            }
 
             foreach (KeyValuePair<CommandCategory, List<Command>> kvp in CommandTree)
             {

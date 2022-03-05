@@ -1,8 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Text;
-using OpenMetaverse;
-using OpenMetaverse.Packets;
 
 namespace OpenMetaverse.TestClient
 {
@@ -19,7 +15,7 @@ namespace OpenMetaverse.TestClient
         {
             int channel = 0;
             int startIndex = 0;
-            string message = String.Empty;
+            string message = string.Empty;
             if (args.Length < 1)
             {
                 return "usage: shout (optional channel) whatever";

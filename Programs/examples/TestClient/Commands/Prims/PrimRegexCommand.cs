@@ -1,7 +1,5 @@
-using System;
 using System.Linq;
 using System.Text.RegularExpressions;
-using OpenMetaverse;
 
 namespace OpenMetaverse.TestClient
 {
@@ -30,8 +28,8 @@ namespace OpenMetaverse.TestClient
                 Regex regexPrimName = new Regex(predicatPrim.ToLower());
 
                 // Print result
-                Logger.Log(string.Format("Searching prim for [{0}] ({1} prims loaded in simulator)\n", predicatPrim,
-                    Client.Network.CurrentSim.ObjectsPrimitives.Count), Helpers.LogLevel.Info, Client);
+                Logger.Log(
+                    $"Searching prim for [{predicatPrim}] ({Client.Network.CurrentSim.ObjectsPrimitives.Count} prims loaded in simulator)\n", Helpers.LogLevel.Info, Client);
 
                 Client.Network.CurrentSim.ObjectsPrimitives.ForEach(
                     delegate(Primitive prim)
@@ -57,8 +55,8 @@ namespace OpenMetaverse.TestClient
                                 name = prim.Properties.Name;
                                 description = prim.Properties.Description;
                             }
-                            Logger.Log(string.Format("\nNAME={0}\nID = {1}\nFLAGS = {2}\nTEXT = '{3}'\nDESC='{4}'", name,
-                                prim.ID, prim.Flags.ToString(), prim.Text, description), Helpers.LogLevel.Info, Client);
+                            Logger.Log(
+                                $"\nNAME={name}\nID = {prim.ID}\nFLAGS = {prim.Flags.ToString()}\nTEXT = '{prim.Text}'\nDESC='{description}'", Helpers.LogLevel.Info, Client);
                         }
                     }
                 );

@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using OpenMetaverse;
 
 namespace OpenMetaverse.TestClient
 {
@@ -24,7 +23,7 @@ namespace OpenMetaverse.TestClient
 
             if (args.Length == 0)
                 regionHandle = Client.Network.CurrentSim.Handle;
-            else if (!(args.Length == 1 && UInt64.TryParse(args[0], out regionHandle)))
+            else if (!(args.Length == 1 && ulong.TryParse(args[0], out regionHandle)))
                 return "Usage: agentlocations [regionhandle]";
 
             List<MapItem> items = Client.Grid.MapItems(regionHandle, GridItemType.AgentLocations, 

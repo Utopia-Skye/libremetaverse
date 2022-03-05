@@ -1,9 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Text;
-using OpenMetaverse;
-using OpenMetaverse.Packets;
-
 namespace OpenMetaverse.TestClient
 {
     public class DilationCommand : Command
@@ -17,7 +11,7 @@ namespace OpenMetaverse.TestClient
 
         public override string Execute(string[] args, UUID fromAgentID)
         {
-            return "Dilation is " + Client.Network.CurrentSim.Stats.Dilation.ToString();
+            return "Dilation is " + Client.Network.CurrentSim.Stats.Dilation;
         }
     }
 }

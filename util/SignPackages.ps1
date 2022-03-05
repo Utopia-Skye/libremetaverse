@@ -1,5 +1,5 @@
 <#
- # Copyright (c) 2021, Sjofn LLC. All rights reserved.
+ # Copyright (c) 2021-2022, Sjofn LLC. All rights reserved.
  #
  # Permission to use, copy, modify, and/or distribute this script for any
  # purpose without fee is hereby granted.
@@ -14,13 +14,18 @@
  #>
 
  param([String]$PfxPasswd)
+
+ if ([string]::IsNullOrEmpty($PfxPasswd)) {
+	Write-Output "Certificate Password not supplied. Cannot sign package."
+	exit
+}
  
  Write-Output "Signing nupkgs..."
 
 Get-ChildItem -Filter "*.nupkg" -Path "C:\Users\appveyor\AppData\Local\Temp\" -recurse | ForEach {
 	Write-Output $("Signing " + $_.Name + "...")
 	nuget sign $_.FullName -NonInteractive -Verbosity quiet `
-						   -CertificateFingerprint 95AEDF70A4C4E6184F43CA8C1E17B6D838430184 `
+						   -CertificateFingerprint 4FC4D098D5CF0C88769B0CE1ED45ABE6B9A8F879 `
 						   -CertificateStoreLocation "LocalMachine" `
 						   -CertificatePassword $PfxPasswd `
 						   -Timestamper http://timestamp.comodoca.com

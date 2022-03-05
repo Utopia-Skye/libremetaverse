@@ -1,7 +1,4 @@
-﻿using System;
-using OpenMetaverse;
-
-namespace OpenMetaverse.TestClient
+﻿namespace OpenMetaverse.TestClient
 {
     public class DeRezCommand : Command
     {
@@ -35,7 +32,7 @@ namespace OpenMetaverse.TestClient
                 }
                 else
                 {
-                    return "Could not find prim " + primID.ToString();
+                    return "Could not find prim " + primID;
                 }
             }
             else

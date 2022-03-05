@@ -1,6 +1,6 @@
 ﻿/*
  * Copyright (c) 2006-2016, openmetaverse.co
- * Copyright (c) 2021, Sjofn LLC
+ * Copyright (c) 2021-2022, Sjofn LLC
  * All rights reserved.
  *
  * - Redistribution and use in source and binary forms, with or without
@@ -28,17 +28,15 @@
 using System;
 using System.IO;
 using System.Net;
-using System.Collections.Generic;
 using System.Runtime.Serialization.Formatters.Binary;
 using System.Text;
 using System.Xml.Serialization;
 using OpenMetaverse;
-using OpenMetaverse.Packets;
 using OpenMetaverse.StructuredData;
 using OpenMetaverse.Messages.Linden;
 using NUnit.Framework;
 
-namespace OpenMetaverse.Tests
+namespace LibreMetaverse.Tests
 {
     /// <summary>
     /// These unit tests specifically test the Message class can serialize and deserialize its own data properly

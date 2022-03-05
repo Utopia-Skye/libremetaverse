@@ -1,9 +1,5 @@
 using System;
-using System.Collections.Generic;
 using System.Threading;
-using OpenMetaverse;
-using OpenMetaverse.Packets;
-using System.Text;
 
 namespace OpenMetaverse.TestClient
 {
@@ -28,9 +24,9 @@ namespace OpenMetaverse.TestClient
             if (args.Length < 1)
                 return Description;
 
-            groupName = String.Empty;
+            groupName = string.Empty;
             resolvedGroupID = UUID.Zero;
-            resolvedGroupName = String.Empty;
+            resolvedGroupName = string.Empty;
 
             if (args[0].ToLower() == "uuid")
             {
@@ -113,7 +109,7 @@ namespace OpenMetaverse.TestClient
                         foreach (DirectoryManager.GroupSearchData groupRetrieved in e.MatchedGroups)
                         {
                             Console.WriteLine(groupRetrieved.GroupName + "\t\t\t(" +
-                                Name + " UUID " + groupRetrieved.GroupID.ToString() + ")");
+                                Name + " UUID " + groupRetrieved.GroupID + ")");
 
                             if (groupRetrieved.GroupName.ToLower() == groupName.ToLower())
                             {
@@ -123,7 +119,7 @@ namespace OpenMetaverse.TestClient
                             }
                         }
                         if (string.IsNullOrEmpty(resolvedGroupName))
-                            resolvedGroupName = "Ambiguous name. Found " + e.MatchedGroups.Count.ToString() + " groups (UUIDs on console)";
+                            resolvedGroupName = "Ambiguous name. Found " + e.MatchedGroups.Count + " groups (UUIDs on console)";
                     }
 
                 }
@@ -133,7 +129,7 @@ namespace OpenMetaverse.TestClient
 
         void Groups_OnGroupJoined(object sender, GroupOperationEventArgs e)
         {
-            Console.WriteLine(Client.ToString() + (e.Success ? " joined " : " failed to join ") + e.GroupID.ToString());
+            Console.WriteLine(Client + (e.Success ? " joined " : " failed to join ") + e.GroupID);
 
             /* A.Biondi 
              * This code is not necessary because it is yet present in the 

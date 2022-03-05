@@ -2,7 +2,6 @@
 using System.IO;
 using System.Collections.Generic;
 using System.Threading;
-using OpenMetaverse;
 
 namespace OpenMetaverse.TestClient
 {
@@ -57,7 +56,7 @@ namespace OpenMetaverse.TestClient
                 };
 
             // Subscribe to the event that will tell us the status of the download
-            Client.Assets.XferReceived += new EventHandler<XferReceivedEventArgs>(Assets_XferReceived);
+            Client.Assets.XferReceived += Assets_XferReceived;
             // subscribe to the event which tells us when the simulator has received our request
             Client.Assets.InitiateDownload += initiateDownloadDelegate;
 
@@ -76,7 +75,7 @@ namespace OpenMetaverse.TestClient
 
             // unsubscribe from events
             Client.Assets.InitiateDownload -= initiateDownloadDelegate;
-            Client.Assets.XferReceived -= new EventHandler<XferReceivedEventArgs>(Assets_XferReceived);
+            Client.Assets.XferReceived -= Assets_XferReceived;
 
             // return the result
             return result.ToString();

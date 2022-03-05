@@ -1,9 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Text;
-using OpenMetaverse;
-using OpenMetaverse.Packets;
-
 namespace OpenMetaverse.TestClient
 {
     public class SitOnCommand : Command
@@ -32,7 +26,7 @@ namespace OpenMetaverse.TestClient
                 {
                     Client.Self.RequestSit(targetPrim.ID, Vector3.Zero);
                     Client.Self.Sit();
-                    return "Requested to sit on prim " + targetPrim.ID.ToString() +
+                    return "Requested to sit on prim " + targetPrim.ID +
                         " (" + targetPrim.LocalID + ")";
                 }
             }

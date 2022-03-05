@@ -1,85 +1,57 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
-    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <ProductVersion>9.0.30729</ProductVersion>
-    <SchemaVersion>2.0</SchemaVersion>
-    <ProjectGuid>{2E2B643F-F18B-4791-BA4B-6E82D0E794B6}</ProjectGuid>
-    <OutputType>Library</OutputType>
-    <RootNamespace>LibreMetaverse.PrimMesher</RootNamespace>
+	<RootNamespace>LibreMetaverse.PrimMesher</RootNamespace>
     <AssemblyName>LibreMetaverse.PrimMesher</AssemblyName>
+	<PackageId>LibreMetaverse.PrimMesher</PackageId>
+	<OutputType>Library</OutputType>
     <TargetFrameworks>netstandard2.0;netstandard2.1;net5.0</TargetFrameworks>
     <Authors>Dhalia Trimble, Sjofn LLC, OpenMetaverse Developers</Authors>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-    <Version>1.2.0</Version>
-    <Product>LibreMetaverse.PrimMesher</Product>
-    <PackageId>LibreMetaverse.PrimMesher</PackageId>
-    <Copyright>Copyright © OpenMetaverse Developers 2008, 2017. Copyright © Sjofn LLC 2018-2021. All rights reserved.</Copyright>
-    <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
-    <RepositoryUrl>https://github.com/cinderblocks/libremetaverse</RepositoryUrl>
-    <Platforms>AnyCPU;x64;x86</Platforms>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-    <DebugSymbols>true</DebugSymbols>
-    <DebugType>full</DebugType>
-    <Optimize>false</Optimize>
-    <OutputPath>..\bin\</OutputPath>
-    <DefineConstants>TRACE;DEBUG;VERTEX_INDEXER</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
+	<IncludeSymbols>true</IncludeSymbols>
+	<SymbolPackageFormat>snupkg</SymbolPackageFormat>
+	<NoWarn>0419,1574,1591</NoWarn>
+	<Platforms>x64;x86;AnyCPU</Platforms>
+	<OutputPath>..\bin\</OutputPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x86'">
-    <DebugSymbols>true</DebugSymbols>
     <DebugType>full</DebugType>
     <Optimize>false</Optimize>
-    <OutputPath>..\bin\</OutputPath>
     <DefineConstants>TRACE;DEBUG;VERTEX_INDEXER</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <DebugSymbols>true</DebugSymbols>
     <DebugType>full</DebugType>
     <Optimize>false</Optimize>
-    <OutputPath>..\bin\</OutputPath>
     <DefineConstants>TRACE;DEBUG;VERTEX_INDEXER</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
   </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-    <DebugType>pdbonly</DebugType>
-    <Optimize>true</Optimize>
-    <OutputPath>..\bin\</OutputPath>
-    <DefineConstants>TRACE;VERTEX_INDEXER</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <DefineConstants>TRACE;DEBUG;VERTEX_INDEXER</DefineConstants>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x86'">
-    <DebugType>pdbonly</DebugType>
+	<GenerateDocumentationFile>true</GenerateDocumentationFile>
+	<DebugType>pdbonly</DebugType>
     <Optimize>true</Optimize>
-    <OutputPath>..\bin\</OutputPath>
     <DefineConstants>TRACE;VERTEX_INDEXER</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+	<GenerateDocumentationFile>true</GenerateDocumentationFile>
+	<DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <DefineConstants>TRACE;VERTEX_INDEXER</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <DebugType>pdbonly</DebugType>
     <Optimize>true</Optimize>
-    <OutputPath>..\bin\</OutputPath>
     <DefineConstants>TRACE;VERTEX_INDEXER</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
   </PropertyGroup>
-  <ItemGroup>
-    <Folder Include="Properties\" />
-  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="System.Drawing.Common" Version="5.0.2" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\LICENSE.txt">
-      <Pack>True</Pack>
-      <PackagePath></PackagePath>
-    </None>
+	<None Include="..\LICENSE.txt" Pack="true" PackagePath="\" />
+	<None Include="..\README.md" Pack="true" PackagePath="\" />
+	<None Include="..\data\logo.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>

@@ -6,24 +6,33 @@ init:
 
 environment:
   matrix:
-  - job_name: Windows Build
+  - job_name: Windows x64 Build
     platform: x64
-    appveyor_build_worker_image: Visual Studio 2019
+    appveyor_build_worker_image: Visual Studio 2022
     configuration: Release
-  - job_name: MacOS Build
+  - job_name: Windows x86 Build
     platform: x64
-    appveyor_build_worker_image: macos
+    appveyor_build_worker_image: Visual Studio 2022
+    configuration: Release
+  - job_name: Linux Build
+    platform: x64
+    appveyor_build_worker_image: Ubuntu
     configuration: ReleaseNoGui
 
   LMVTestAgentUsername: SecretAgentTest Resident
   LMVTestAgentPassword:
     secure: bOoXrGfLiHjZlCG1tJ+nDQ==
   PfxDownloadUrl:
-    secure: 6zETilPjqhwgznp0rOyu2lloNy/uIU0coJBWCW+ADBiofQTU8ZuU3BCIEifEPI1R
+    secure: 6zETilPjqhwgznp0rOyu2uOUI4whFbLT3QUXdaTQSH/FqOXIKwj/qz3d4Xo2rrgo
   PfxDownloadPasswd:
     secure: qzHJldnavMFT8+Cm2eXndg==
   PfxPassword:
     secure: +vWSGzLkiBGVIxfPb+iRtD+/maQjI2d92hN4PoNAxMc=
+
+matrix:
+  allow_failures:
+  - image: macos-mojave
+  - image: Ubuntu
 
 pull_requests:
   do_not_increment_build_number: false
@@ -36,7 +45,8 @@ build:
   parallel: true
   verbosity: minimal
   publish_nuget: true
-  publish_nuget_symbols: false
+  publish_nuget_symbols: true
+  use_snupkg_format: true
 
 cache:
   - packages -> **\packages.config
@@ -44,13 +54,13 @@ cache:
 
 dotnet_csproj:
   patch: true
-  file: '**\*.csproj'
+  file: '**\*.csproj;**\*.props'
   version: '{version}'
   package_version: '{version}'
 
 before_build:
   - dotnet --info
-  - nuget restore LibreMetaverse.sln
+  - dotnet restore LibreMetaverse.sln
 
 artifacts:
   - path: 'nuget_libraries.zip'
@@ -62,12 +72,12 @@ deploy:
     name: nuget_release
     api_key:
       secure: Mvs+45lPmiSYC9hv3AqdKWJVEzA5B5w0iU2IUCRz2/cxow/s00suGcO326h4Gjt7
-    artifact: /.*LibreMetaverse.*\.nupkg/
-    skip_symbols: true
+    artifact: /.*LibreMetaverse.*(\.|\.s)nupkg/
+    skip_symbols: false
     draft: false
     prerelease: false
     on:
-      job_name: Windows build
+      job_name: Windows x64 build
       APPVEYOR_REPO_TAG: true
   - provider: GitHub
     name: github_releases
@@ -75,19 +85,19 @@ deploy:
     tag: $(appveyor_build_version)
     auth_token:
       secure: lzcaOIXHRZG5WwFThR/DpNiVFh/q4zVis8YcLkmXhJHjFsq8tZgewzVhTmopZhjW
-    artifact: /.*LibreMetaverse.*\.nupkg/
-    skip_symbols: true
+    artifact: /.*LibreMetaverse.*(\.|\.s)nupkg/
+    skip_symbols: false
     draft: false
     prerelease: false
     on:
-      job_name: Windows build
+      job_name: Windows x64 build
       APPVEYOR_REPO_TAG: true
 
 for:
 -
   matrix:
     only:
-      - job_name: Windows Build
+      - job_name: Windows x64 Build
 
   after_build:
     - ps: util/InstallRemotePfx.ps1 -PfxDownloadUrl $env:PfxDownloadUrl -PfxDownloadUser AppVeyor -PfxDownloadPasswd $env:PfxDownloadPasswd -PfxPasswd $env:PfxPassword

@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 
 namespace OpenMetaverse.TestClient.Commands.Inventory.Shell
 {
@@ -31,7 +30,7 @@ namespace OpenMetaverse.TestClient.Commands.Inventory.Shell
             string ret = "";
             string nl = "\n";
 
-            string target = args.Aggregate(String.Empty, (current, t) => current + t + " ");
+            string target = args.Aggregate(string.Empty, (current, t) => current + t + " ");
             target = target.TrimEnd();
 
             string inventoryName = target;

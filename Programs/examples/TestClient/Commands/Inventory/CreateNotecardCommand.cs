@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Threading;
-using OpenMetaverse;
 using OpenMetaverse.Assets;
 
 namespace OpenMetaverse.TestClient
@@ -26,7 +25,7 @@ namespace OpenMetaverse.TestClient
             UUID embedItemID = UUID.Zero, notecardItemID = UUID.Zero, notecardAssetID = UUID.Zero;
             string filename, fileData;
             bool success = false, finalUploadSuccess = false;
-            string message = String.Empty;
+            string message = string.Empty;
             AutoResetEvent notecardEvent = new AutoResetEvent(false);
 
             if (args.Length == 1)
@@ -51,8 +50,10 @@ namespace OpenMetaverse.TestClient
 
             #region Notecard asset data
 
-            AssetNotecard notecard = new AssetNotecard();
-            notecard.BodyText = fileData;
+            AssetNotecard notecard = new AssetNotecard
+            {
+                BodyText = fileData
+            };
 
             // Item embedding
             if (embedItemID != UUID.Zero)
@@ -84,8 +85,10 @@ namespace OpenMetaverse.TestClient
                         #region Upload an empty notecard asset first
 
                         AutoResetEvent emptyNoteEvent = new AutoResetEvent(false);
-                        AssetNotecard empty = new AssetNotecard();
-                        empty.BodyText = "\n";
+                        AssetNotecard empty = new AssetNotecard
+                        {
+                            BodyText = "\n"
+                        };
                         empty.Encode();
 
                         Client.Inventory.RequestUploadNotecardAsset(empty.AssetData, item.UUID,

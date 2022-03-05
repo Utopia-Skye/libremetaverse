@@ -1,12 +1,8 @@
 using System;
-using System.Collections.Generic;
-using System.Text;
-using OpenMetaverse;
-using OpenMetaverse.Packets;
 
 namespace OpenMetaverse.TestClient
 {
-    public enum CommandCategory : int
+    public enum CommandCategory
     {
         Parcel,
         Appearance,

@@ -1,6 +1,6 @@
 /**
  * Copyright (c) 2006-2016, openmetaverse.co
- * Copyright (c) 2021, Sjofn LLC.
+ * Copyright (c) 2021-2022, Sjofn LLC.
  * All rights reserved.
  *
  * - Redistribution and use in source and binary forms, with or without 
@@ -100,7 +100,7 @@ namespace OpenMetaverse.TestClient
                 }
             }
 
-            return "Couldn't find avatar " + target.ToString();
+            return "Couldn't find avatar " + target;
         }
 
         private void Assets_OnImageReceived(TextureRequestState state, AssetTexture assetTexture)

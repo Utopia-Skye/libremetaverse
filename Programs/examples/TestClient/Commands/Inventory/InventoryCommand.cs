@@ -1,12 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Text;
-using System.Threading;
-using System.Xml;
-using System.Xml.Serialization;
-using OpenMetaverse;
-using OpenMetaverse.Packets;
 
 namespace OpenMetaverse.TestClient
 {
@@ -44,7 +38,7 @@ namespace OpenMetaverse.TestClient
             {
                 foreach (InventoryBase i in contents)
                 {
-                    result.AppendFormat("{0}{1} ({2})\n", new String(' ', indent * 2), i.Name, i.UUID);
+                    result.AppendFormat("{0}{1} ({2})\n", new string(' ', indent * 2), i.Name, i.UUID);
                     if (i is InventoryFolder folder)
                     {
                         PrintFolder(folder, result, indent + 1);
