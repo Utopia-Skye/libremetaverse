@@ -1,22 +1,17 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
 	<RootNamespace>LibreMetaverse.PrimMesher</RootNamespace>
     <AssemblyName>LibreMetaverse.PrimMesher</AssemblyName>
 	<PackageId>LibreMetaverse.PrimMesher</PackageId>
 	<OutputType>Library</OutputType>
-    <TargetFrameworks>netstandard2.0;netstandard2.1;net5.0</TargetFrameworks>
+    <TargetFrameworks>net48;netstandard2.1;net6.0;net7.0</TargetFrameworks>
     <Authors>Dhalia Trimble, Sjofn LLC, OpenMetaverse Developers</Authors>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
 	<IncludeSymbols>true</IncludeSymbols>
 	<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 	<NoWarn>0419,1574,1591</NoWarn>
-	<Platforms>AnyCPU;x64;x86</Platforms>
+	<Platforms>x64;x86;AnyCPU</Platforms>
 	<OutputPath>..\bin\</OutputPath>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-    <DebugType>full</DebugType>
-    <Optimize>false</Optimize>
-    <DefineConstants>TRACE;DEBUG;VERTEX_INDEXER</DefineConstants>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x86'">
     <DebugType>full</DebugType>
@@ -28,11 +23,10 @@
     <Optimize>false</Optimize>
     <DefineConstants>TRACE;DEBUG;VERTEX_INDEXER</DefineConstants>
   </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-	<GenerateDocumentationFile>true</GenerateDocumentationFile>
-	<DebugType>pdbonly</DebugType>
-    <Optimize>true</Optimize>
-    <DefineConstants>TRACE;VERTEX_INDEXER</DefineConstants>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <DefineConstants>TRACE;DEBUG;VERTEX_INDEXER</DefineConstants>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x86'">
 	<GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -46,12 +40,18 @@
     <Optimize>true</Optimize>
     <DefineConstants>TRACE;VERTEX_INDEXER</DefineConstants>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <DefineConstants>TRACE;VERTEX_INDEXER</DefineConstants>
+  </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="System.Drawing.Common" Version="6.0.0" />
+    <PackageReference Include="System.Drawing.Common" Version="7.0.0" />
   </ItemGroup>
   <ItemGroup>
-	<None Include="..\LICENSE.txt" Pack="true" PackagePath="docs\" />
-	<None Include="..\README.md" Pack="true" PackagePath="docs\" />
-	<None Include="..\data\logo.png" Pack="true" PackagePath="images\" />
+	<None Include="..\LICENSE.txt" Pack="true" PackagePath="\" />
+	<None Include="..\README.md" Pack="true" PackagePath="\" />
+	<None Include="..\data\logo.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>

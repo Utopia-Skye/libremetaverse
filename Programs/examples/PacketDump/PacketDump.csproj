@@ -5,9 +5,8 @@
 	<OutputType>Exe</OutputType>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <OutputPath>..\..\..\bin\</OutputPath>
-    <TargetFrameworks>netcoreapp3.1;net5.0</TargetFrameworks>
-    <Platforms>AnyCPU;x64;x86</Platforms>
-    <IsTool>true</IsTool>
+    <TargetFrameworks>net6.0;net7.0</TargetFrameworks>
+    <Platforms>AnyCPU</Platforms>
 	<IncludeSymbols>true</IncludeSymbols>
 	<SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
@@ -19,8 +18,8 @@
     <ProjectReference Include="..\..\..\LibreMetaverse.Types\LibreMetaverse.Types.csproj" />
   </ItemGroup>
   <ItemGroup>
-	<None Include="..\..\..\LICENSE.txt" Pack="true" PackagePath="docs\" />
-	<None Include="..\..\..\README.md" Pack="true" PackagePath="docs\" />
-	<None Include="..\..\..\data\logo.png" Pack="true" PackagePath="images\" />
+	<None Include="..\..\..\LICENSE.txt" Pack="true" PackagePath="\" />
+	<None Include="..\..\..\README.md" Pack="true" PackagePath="\" />
+	<None Include="..\..\..\data\logo.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>

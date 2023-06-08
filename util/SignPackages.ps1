@@ -1,5 +1,5 @@
 <#
- # Copyright (c) 2021, Sjofn LLC. All rights reserved.
+ # Copyright (c) 2021-2022, Sjofn LLC. All rights reserved.
  #
  # Permission to use, copy, modify, and/or distribute this script for any
  # purpose without fee is hereby granted.
@@ -25,7 +25,7 @@
 Get-ChildItem -Filter "*.nupkg" -Path "C:\Users\appveyor\AppData\Local\Temp\" -recurse | ForEach {
 	Write-Output $("Signing " + $_.Name + "...")
 	nuget sign $_.FullName -NonInteractive -Verbosity quiet `
-						   -CertificateFingerprint 4FC4D098D5CF0C88769B0CE1ED45ABE6B9A8F879 `
+						   -CertificateFingerprint 688eef6260f0fff81e1d46e2605c8039833a92bb `
 						   -CertificateStoreLocation "LocalMachine" `
 						   -CertificatePassword $PfxPasswd `
 						   -Timestamper http://timestamp.comodoca.com

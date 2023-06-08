@@ -1,5 +1,33 @@
+/*
+ * Copyright (c) 2006-2016, openmetaverse.co
+ * Copyright (c) 2019-2022, Sjofn, LLC
+ * All rights reserved.
+ *
+ * - Redistribution and use in source and binary forms, with or without 
+ *   modification, are permitted provided that the following conditions are met:
+ *
+ * - Redistributions of source code must retain the above copyright notice, this
+ *   list of conditions and the following disclaimer.
+ * - Neither the name of the openmetaverse.co nor the names 
+ *   of its contributors may be used to endorse or promote products derived from
+ *   this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE 
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE 
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE 
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR 
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF 
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS 
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN 
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) 
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 
 namespace OpenMetaverse.TestClient
@@ -14,22 +42,6 @@ namespace OpenMetaverse.TestClient
         public string MasterName;
         public UUID MasterKey;
         public string URI;
-    }
-
-    public class StartPosition
-    {
-        public string sim;
-        public int x;
-        public int y;
-        public int z;
-
-        public StartPosition()
-        {
-            this.sim = null;
-            this.x = 0;
-            this.y = 0;
-            this.z = 0;
-        }
     }
 
     public sealed class ClientManager
@@ -59,6 +71,11 @@ namespace OpenMetaverse.TestClient
                 Login(account);
         }
 
+        /// <summary>
+        /// Login command with required args
+        /// </summary>
+        /// <param name="args"></param>
+        /// <returns></returns>
         public TestClient Login(string[] args)
         {
             if (args.Length < 3)
@@ -97,7 +114,9 @@ namespace OpenMetaverse.TestClient
 
                     // Otherwise, use the center of the named region
                     if (account.StartLocation == null)
+                    {
                         account.StartLocation = NetworkManager.StartLocation(args[3], 128, 128, 40);
+                    }
                 }
             }
 
@@ -107,26 +126,33 @@ namespace OpenMetaverse.TestClient
 
             if (string.IsNullOrEmpty(account.URI))
                 account.URI = Program.LoginURI;
-            Logger.Log("Using login URI " + account.URI, Helpers.LogLevel.Info);
+            Logger.Log($"Using login URI {account.URI}", Helpers.LogLevel.Info);
 
             return Login(account);
         }
 
+        /// <summary>
+        /// Login account with provided <seealso cref="LoginDetails"/> 
+        /// </summary>
+        /// <param name="account"></param>
+        /// <returns></returns>
         public TestClient Login(LoginDetails account)
         {
             // Check if this client is already logged in
-            foreach (TestClient c in Clients.Values)
+            foreach (var c in Clients.Values.Where(
+                         tc => tc.Self.FirstName == account.FirstName
+                                   && tc.Self.LastName == account.LastName))
             {
-                if (c.Self.FirstName == account.FirstName && c.Self.LastName == account.LastName)
-                {
-                    Logout(c);
-                    break;
-                }
+                Logout(c);
+                break;
             }
 
             ++PendingLogins;
 
-            TestClient client = new TestClient(this);
+            TestClient client = new TestClient(this)
+            {
+                Settings = { MFA_ENABLED = true }
+            };
             client.Network.LoginProgress +=
                 delegate(object sender, LoginProgressEventArgs e)
                 {
@@ -139,34 +165,32 @@ namespace OpenMetaverse.TestClient
                         if (client.MasterKey == UUID.Zero)
                         {
                             UUID query = UUID.Zero;
-                            EventHandler<DirPeopleReplyEventArgs> peopleDirCallback =
-                                delegate(object sender2, DirPeopleReplyEventArgs dpe)
-                                {
-                                    if (dpe.QueryID == query)
-                                    {
-                                        if (dpe.MatchedPeople.Count != 1)
-                                        {
-                                            Logger.Log("Unable to resolve master key from " + client.MasterName, Helpers.LogLevel.Warning);
-                                        }
-                                        else
-                                        {
-                                            client.MasterKey = dpe.MatchedPeople[0].AgentID;
-                                            Logger.Log("Master key resolved to " + client.MasterKey, Helpers.LogLevel.Info);
-                                        }
-                                    }
-                                };
 
-                            client.Directory.DirPeopleReply += peopleDirCallback;
+                            void PeopleDirCallback(object sender2, DirPeopleReplyEventArgs dpe)
+                            {
+                                if (dpe.QueryID != query) { return; }
+                                if (dpe.MatchedPeople.Count != 1)
+                                {
+                                    Logger.Log($"Unable to resolve master key from {client.MasterName}", Helpers.LogLevel.Warning);
+                                }
+                                else
+                                {
+                                    client.MasterKey = dpe.MatchedPeople[0].AgentID;
+                                    Logger.Log($"Master key resolved to {client.MasterKey}", Helpers.LogLevel.Info);
+                                }
+                            }
+
+                            client.Directory.DirPeopleReply += PeopleDirCallback;
                             query = client.Directory.StartPeopleSearch(client.MasterName, 0);
                         }
 
-                        Logger.Log("Logged in " + client.ToString(), Helpers.LogLevel.Info);
+                        Logger.Log($"Logged in {client}", Helpers.LogLevel.Info);
                         --PendingLogins;
                     }
                     else if (e.Status == LoginStatus.Failed)
                     {
-                        Logger.Log("Failed to login " + account.FirstName + " " + account.LastName + ": " +
-                            client.Network.LoginMessage, Helpers.LogLevel.Warning);
+                        Logger.Log($"Failed to login {account.FirstName} {account.LastName}: {client.Network.LoginMessage}", 
+                            Helpers.LogLevel.Warning);
                         --PendingLogins;
                     }
                 };
@@ -185,10 +209,10 @@ namespace OpenMetaverse.TestClient
             LoginParams loginParams = client.Network.DefaultLoginParams(
                     account.FirstName, account.LastName, account.Password, "TestClient", VERSION);
 
-            if (!String.IsNullOrEmpty(account.StartLocation))
+            if (!string.IsNullOrEmpty(account.StartLocation))
                 loginParams.Start = account.StartLocation;
 
-            if (!String.IsNullOrEmpty(account.URI))
+            if (!string.IsNullOrEmpty(account.URI))
                 loginParams.URI = account.URI;
 
             client.Network.BeginLogin(loginParams);
@@ -196,8 +220,9 @@ namespace OpenMetaverse.TestClient
         }
 
         /// <summary>
-        /// 
+        /// Begin running client
         /// </summary>
+        /// <param name="noGUI">Run with Gui or nah</param>
         public void Run(bool noGUI)
         {
             if (noGUI)
@@ -218,23 +243,20 @@ namespace OpenMetaverse.TestClient
                 }
             }
 
-            foreach (GridClient client in Clients.Values)
+            foreach (var client in Clients.Values.Cast<GridClient>().Where(client => client.Network.Connected))
             {
-                if (client.Network.Connected)
-                    client.Network.Logout();
+                client.Network.Logout();
             }
         }
 
+        /// <summary>
+        /// Print GUI prompt to screen
+        /// </summary>
         private void PrintPrompt()
         {
-            int online = 0;
+            int online = Clients.Values.Cast<GridClient>().Count(client => client.Network.Connected);
 
-            foreach (GridClient client in Clients.Values)
-            {
-                if (client.Network.Connected) online++;
-            }
-
-            Console.Write(online + " avatars online> ");
+            Console.Write($"{online} avatars online> ");
         }
 
         /// <summary>
@@ -247,12 +269,12 @@ namespace OpenMetaverse.TestClient
         {
             if (cmd == null)
                 return;
-            string[] tokens = cmd.Trim().Split(new char[] { ' ', '\t' });
+            string[] tokens = cmd.Trim().Split(' ', '\t');
             if (tokens.Length == 0)
                 return;
             
             string firstToken = tokens[0].ToLower();
-            if (String.IsNullOrEmpty(firstToken))
+            if (string.IsNullOrEmpty(firstToken))
                 return;
 
             // Allow for comments when cmdline begins with ';' or '#'
@@ -260,21 +282,15 @@ namespace OpenMetaverse.TestClient
                 return;
 
             if ('@' == firstToken[0]) {
-                onlyAvatar = String.Empty;
+                onlyAvatar = string.Empty;
                 if (tokens.Length == 3) {
-                    bool found = false;
                     onlyAvatar = tokens[1]+" "+tokens[2];
-                    foreach (TestClient client in Clients.Values) {
-                        if ((client.ToString() == onlyAvatar) && (client.Network.Connected)) {
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (found) {
-                        Logger.Log("Commanding only "+onlyAvatar+" now", Helpers.LogLevel.Info);
-                    } else {
-                        Logger.Log("Commanding nobody now. Avatar "+onlyAvatar+" is offline", Helpers.LogLevel.Info);
-                    }
+                    bool found = Clients.Values.Any(client => (client.ToString() == onlyAvatar) && (client.Network.Connected));
+
+                    Logger.Log(
+                        found
+                            ? $"Commanding only {onlyAvatar} now"
+                            : $"Commanding nobody now. Avatar {onlyAvatar} is offline", Helpers.LogLevel.Info);
                 } else {
                     Logger.Log("Commanding all avatars now", Helpers.LogLevel.Info);
                 }
@@ -337,11 +353,11 @@ namespace OpenMetaverse.TestClient
 
                 foreach (TestClient client in clientsCopy.Values)
                 {
-                    ThreadPool.QueueUserWorkItem((WaitCallback)
+                    ThreadPool.QueueUserWorkItem(
                         delegate(object state)
                         {
                             TestClient testClient = (TestClient)state;
-                            if ((String.Empty == onlyAvatar) || (testClient.ToString() == onlyAvatar)) {
+                            if ((string.Empty == onlyAvatar) || (testClient.ToString() == onlyAvatar)) {
                                 if (testClient.Commands.ContainsKey(firstToken)) {
                                     string result;
                                     try {
@@ -353,7 +369,7 @@ namespace OpenMetaverse.TestClient
                                                    testClient);
                                     }
                                 } else
-                                    Logger.Log("Unknown command " + firstToken, Helpers.LogLevel.Warning);
+                                    Logger.Log($"Unknown command {firstToken}", Helpers.LogLevel.Warning);
                             }
 
                             ++completed;
@@ -367,9 +383,9 @@ namespace OpenMetaverse.TestClient
         }
 
         /// <summary>
-        /// 
+        /// Logout specified <seealso cref="TestClient"/> instance
         /// </summary>
-        /// <param name="client"></param>
+        /// <param name="client">Client to perform logout</param>
         public void Logout(TestClient client)
         {
             Clients.Remove(client.Self.AgentID);
@@ -377,7 +393,7 @@ namespace OpenMetaverse.TestClient
         }
 
         /// <summary>
-        /// 
+        /// Exit the program
         /// </summary>
         public void Quit()
         {

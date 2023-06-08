@@ -1,6 +1,6 @@
 /**
  * Copyright (c) 2006-2016, openmetaverse.co
- * Copyright (c) 2021, Sjofn LLC.
+ * Copyright (c) 2021-2022, Sjofn LLC.
  * All rights reserved.
  *
  * - Redistribution and use in source and binary forms, with or without 
@@ -58,7 +58,7 @@ namespace OpenMetaverse.TestClient
             TextureID = UUID.Zero;
             inventoryName = args[0];
             fileName = args[2];
-            if (!UInt32.TryParse(args[1], out timeout))
+            if (!uint.TryParse(args[1], out timeout))
                 return "Usage: uploadimage [inventoryname] [timeout] [filename]";
 
             Console.WriteLine("Loading image " + fileName);
@@ -71,8 +71,7 @@ namespace OpenMetaverse.TestClient
 
             if (UploadCompleteEvent.WaitOne((int)timeout, false))
             {
-                return String.Format("Texture upload {0}: {1}", (TextureID != UUID.Zero) ? "succeeded" : "failed",
-                    TextureID);
+                return $"Texture upload {((TextureID != UUID.Zero) ? "succeeded" : "failed")}: {TextureID}";
             }
             else
             {
@@ -172,7 +171,7 @@ namespace OpenMetaverse.TestClient
             }
             catch (Exception ex)
             {
-                Console.WriteLine(ex.ToString() + " SL Image Upload ");
+                Console.WriteLine(ex + " SL Image Upload ");
                 return null;
             }
             return UploadData;

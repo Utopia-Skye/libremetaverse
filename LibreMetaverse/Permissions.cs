@@ -26,7 +26,6 @@
 
 using System;
 using OpenMetaverse.StructuredData;
-using ProtoBuf;
 
 namespace OpenMetaverse
 {
@@ -62,7 +61,7 @@ namespace OpenMetaverse
         All = 0x1F
     }
 
-    [Serializable, ProtoContract(ImplicitFields = ImplicitFields.AllFields)]
+    [Serializable]
     public struct Permissions
     {
         public PermissionMask BaseMask;
@@ -109,9 +108,8 @@ namespace OpenMetaverse
         public static Permissions FromOSD(OSD llsd)
         {
             Permissions permissions = new Permissions();
-            OSDMap map = llsd as OSDMap;
 
-            if (map != null)
+            if (llsd is OSDMap map)
             {
                 permissions.BaseMask = (PermissionMask)map["base_mask"].AsUInteger();
                 permissions.EveryoneMask = (PermissionMask)map["everyone_mask"].AsUInteger();

@@ -1,38 +1,37 @@
 init:
-  - ps: if ($env:APPVEYOR_REPO_TAG -eq "true") { $env:TAG_VERSION = "$env:APPVEYOR_REPO_TAG_NAME.$env:APPVEYOR_BUILD_NUMBER" } else { $env:TAG_VERSION = "v1.9.0.$env:APPVEYOR_BUILD_NUMBER-alpha" }
+  - ps: if ($env:APPVEYOR_REPO_TAG -eq "true") { $env:TAG_VERSION = "$env:APPVEYOR_REPO_TAG_NAME.$env:APPVEYOR_BUILD_NUMBER" } else { $env:TAG_VERSION = "v2.0.0.$env:APPVEYOR_BUILD_NUMBER-alpha" }
   - ps: $env:TAG_VERSION = $env:TAG_VERSION -replace 'v',''
   - ps: Write-Host "Setting version to '$env:TAG_VERSION'"
   - ps: Update-AppveyorBuild -Version "$env:TAG_VERSION"
 
 environment:
   matrix:
-  - job_name: Windows Build
+  - job_name: Windows x64 Build
+    platform: x64
+    appveyor_build_worker_image: Visual Studio 2022
+    configuration: Release
+  - job_name: Windows x86 Build
     platform: x64
     appveyor_build_worker_image: Visual Studio 2022
     configuration: Release
   - job_name: Linux Build
     platform: x64
-    appveyor_build_worker_image: Ubuntu2004
-    configuration: ReleaseNoGui
-  - job_name: MacOS Build
-    platform: x64
-    appveyor_build_worker_image: macOS
+    appveyor_build_worker_image: Ubuntu
     configuration: ReleaseNoGui
 
   LMVTestAgentUsername: SecretAgentTest Resident
   LMVTestAgentPassword:
     secure: bOoXrGfLiHjZlCG1tJ+nDQ==
   PfxDownloadUrl:
-    secure: 6zETilPjqhwgznp0rOyu2uOUI4whFbLT3QUXdaTQSH/FqOXIKwj/qz3d4Xo2rrgo
+    secure: T8uKu+tTR2G7LDE1zPGNOi+prl4YaKXP6DOC5eU6A14FEQkd8PFR3nQ1WMwryphJ
   PfxDownloadPasswd:
-    secure: qzHJldnavMFT8+Cm2eXndg==
+    secure: nAIqrjhaoamhiuAcae/xNw==
   PfxPassword:
     secure: +vWSGzLkiBGVIxfPb+iRtD+/maQjI2d92hN4PoNAxMc=
 
 matrix:
   allow_failures:
-  - image: macOS
-  - image: Ubuntu2004
+  - image: Ubuntu
 
 pull_requests:
   do_not_increment_build_number: false
@@ -45,7 +44,8 @@ build:
   parallel: true
   verbosity: minimal
   publish_nuget: true
-  publish_nuget_symbols: false
+  publish_nuget_symbols: true
+  use_snupkg_format: true
 
 cache:
   - packages -> **\packages.config
@@ -59,7 +59,7 @@ dotnet_csproj:
 
 before_build:
   - dotnet --info
-  - nuget restore LibreMetaverse.sln
+  - dotnet restore LibreMetaverse.sln
 
 artifacts:
   - path: 'nuget_libraries.zip'
@@ -70,13 +70,13 @@ deploy:
   - provider: NuGet
     name: nuget_release
     api_key:
-      secure: Mvs+45lPmiSYC9hv3AqdKWJVEzA5B5w0iU2IUCRz2/cxow/s00suGcO326h4Gjt7
-    artifact: /.*LibreMetaverse.*\.nupkg/
+      secure: A0kUKZQCzVX2Wt/pUgN18oYV83YNbRiMBxKczUFE+i0z6x3+CkJKzdYO15npvoKA
+    artifact: /.*LibreMetaverse.*(\.|\.s)nupkg/
     skip_symbols: false
     draft: false
     prerelease: false
     on:
-      job_name: Windows build
+      job_name: Windows x64 build
       APPVEYOR_REPO_TAG: true
   - provider: GitHub
     name: github_releases
@@ -84,19 +84,19 @@ deploy:
     tag: $(appveyor_build_version)
     auth_token:
       secure: lzcaOIXHRZG5WwFThR/DpNiVFh/q4zVis8YcLkmXhJHjFsq8tZgewzVhTmopZhjW
-    artifact: /.*LibreMetaverse.*\.nupkg/
+    artifact: /.*LibreMetaverse.*(\.|\.s)nupkg/
     skip_symbols: false
     draft: false
     prerelease: false
     on:
-      job_name: Windows build
+      job_name: Windows x64 build
       APPVEYOR_REPO_TAG: true
 
 for:
 -
   matrix:
     only:
-      - job_name: Windows Build
+      - job_name: Windows x64 Build
 
   after_build:
     - ps: util/InstallRemotePfx.ps1 -PfxDownloadUrl $env:PfxDownloadUrl -PfxDownloadUser AppVeyor -PfxDownloadPasswd $env:PfxDownloadPasswd -PfxPasswd $env:PfxPassword

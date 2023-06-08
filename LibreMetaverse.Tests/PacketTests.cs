@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2006-2016, openmetaverse.co
- * Copyright (c) 2021, Sjofn LLC.
+ * Copyright (c) 2021-2022, Sjofn LLC.
  * All rights reserved.
  *
  * - Redistribution and use in source and binary forms, with or without
@@ -25,6 +25,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+using System;
 using OpenMetaverse;
 using OpenMetaverse.Packets;
 using NUnit.Framework;
@@ -161,7 +162,7 @@ namespace LibreMetaverse.Tests
             scriptDialogPacket.Data.Message = Utils.EmptyBytes;
             scriptDialogPacket.Data.ObjectID = UUID.Zero;
             scriptDialogPacket.Data.ObjectName = Utils.EmptyBytes;
-            scriptDialogPacket.Buttons = new ScriptDialogPacket.ButtonsBlock[0];
+            scriptDialogPacket.Buttons = Array.Empty<ScriptDialogPacket.ButtonsBlock>();
             scriptDialogPacket.OwnerData = new ScriptDialogPacket.OwnerDataBlock[1];
             scriptDialogPacket.OwnerData[0] = new ScriptDialogPacket.OwnerDataBlock();
             scriptDialogPacket.OwnerData[0].OwnerID = UUID.Zero;
@@ -176,7 +177,7 @@ namespace LibreMetaverse.Tests
             proPacket.AgentData.SessionID = UUID.Zero;
             proPacket.ParcelData.LocalID = 0;
             proPacket.ParcelData.ReturnType = 0;
-            proPacket.TaskIDs = new ParcelReturnObjectsPacket.TaskIDsBlock[0];
+            proPacket.TaskIDs = Array.Empty<ParcelReturnObjectsPacket.TaskIDsBlock>();
             proPacket.OwnerIDs = new ParcelReturnObjectsPacket.OwnerIDsBlock[1];
             proPacket.OwnerIDs[0] = new ParcelReturnObjectsPacket.OwnerIDsBlock();
             proPacket.OwnerIDs[0].OwnerID = UUID.Zero;
